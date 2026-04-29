@@ -1,7 +1,6 @@
 # FKT — Floppy Kit
 
-**Will it bitcoin?**  
-**Git fkt.**  
+**Will it bitcoin? - Git fkt.**  
 **Signing Bitcoin in 1991.**  
 **Y0UR H4RDW4R3 15 TH3 W4LL3T**
 
