@@ -1,0 +1,33 @@
+# Build artifacts
+*.o
+*.exe
+*.bin
+*.elf
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# Compiled binaries (we only want source in the repo for now)
+fkt_cli
+fkt_cli.exe
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Relay logs and data (optional, but good to ignore)
+*.log
+*.db
+*.lmdb
+
+# Editor files
+.vscode/
+.idea/
