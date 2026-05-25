@@ -68,6 +68,8 @@ Non-Negotiable Rules (never violate these):
 - If both key 0x06 and key 0x16 are present in the same input map, abort with “Conflicting derivation keys”.
 - V0.1 supports Taproot keypath spending only for addresses created without a script tree (PSBT_IN_TAP_MERKLE_ROOT must be absent). Taproot addresses with an associated taptree cannot be signed in V0.1 even via the keypath.
 
+- Note on BIP174 Signer Semantics: FKT intentionally diverges from BIP174 §Signer "pass-through" requirements. Any unknown key in any map causes an immediate hard abort. This eliminates all potential covert channel and data exfiltration attacks via unrecognized fields and is an intentional security-over-compatibility design choice.
+
 **3. SEED PHRASE INPUT & VERIFICATION**
 - Only after preview + hash confirmation.
 - Word-by-word entry with live BIP39 validation (re-prompt until canonical).
@@ -122,13 +124,28 @@ Non-Negotiable Rules (never violate these):
     - sha_sequences
     - sha_outputs
     - spend_type (0x00 for keypath)
+    - outpoint (36 bytes: 32-byte txid + 4-byte vout of *this* input, little-endian)
+    - amount (8 bytes LE — from fkt_input_amounts[input_index])
+    - scriptPubKey (varint length + bytes — from witness_utxo of *this* input)
+    - nSequence (4 bytes LE — from the unsigned transaction input)
     - input_index (4 bytes LE)
 - Explicit public-key verification before signing:
   - P2WPKH: Extract 20-byte witness program from scriptPubKey (0x00 0x14 <hash>). Compute hash160(derived_pubkey). Constant-time compare. Abort on mismatch.
-  - Taproot keypath: Extract 32-byte internal key from PSBT_IN_TAP_INTERNAL_KEY. Verify that the derived internal key (from path) matches the PSBT value. If the internal public key has odd y, negate child_priv (`child_priv = SECP256K1_ORDER - child_priv`). Compute tweak = tagged_hash("TapTweak", internal_key[32]). Interpret the 32-byte tagged hash output as a 256-bit big-endian unsigned integer tweak_int. Abort with 'Invalid Taproot tweak' if tweak_int >= SECP256K1_ORDER. Compute d' = (d + tweak) mod n. Let Q = d'*G. If Q has odd y, set d' = n - d'. Constant-time compare x-only bytes to witness program (0x51 0x20 <32 bytes>). Abort on mismatch.
+  - Taproot keypath: Extract 32-byte internal key from PSBT_IN_TAP_INTERNAL_KEY. Verify that the derived internal key (from path) matches the PSBT value. If the internal public key has odd y, negate child_priv (`child_priv = SECP256K1_ORDER - child_priv`). Compute tweak = tagged_hash("TapTweak", internal_key, 32). The tagged hash is constructed as SHA256(SHA256("TapTweak") || SHA256("TapTweak") || internal_key). Interpret the 32-byte tagged hash output as a 256-bit big-endian unsigned integer tweak_int. Abort with 'Invalid Taproot tweak' if tweak_int >= SECP256K1_ORDER. Compute d' = (d + tweak) mod n. Let Q = d'*G. If Q has odd y, set d' = n - d'. Constant-time compare x-only bytes to witness program (0x51 0x20 <32 bytes>). Abort on mismatch.
 - Sign (ECDSA with RFC6979 deterministic nonces; Schnorr with built-in BIP340 deterministic nonce). For Taproot, the child_priv is tweaked with the BIP341 tweak before signing. After tweaking, verify the resulting private key is valid (non-zero and < curve order). Abort on failure.
+- BIP340 Schnorr signing uses the deterministic fallback with all-zero auxiliary randomness (a 32-byte zero array), per BIP340 §signing. No entropy source is required or used.
 - Build witness stack:
-  - P2WPKH: [ DER_signature + 0x01 (74 bytes max), 33-byte compressed pubkey ]
+    - P2WPKH → BIP143 sighash (with explicit preimage fields):
+    - nVersion (4 bytes LE)
+    - hashPrevouts (32 bytes)
+    - hashSequence (32 bytes)
+    - outpoint (36 bytes)
+    - scriptCode (0x19 0x76 0xa9 0x14 <20-byte hash160 from witness_utxo scriptPubKey bytes [2..21]> 0x88 0xac)
+    - amount (8 bytes LE)
+    - nSequence (4 bytes LE)
+    - hashOutputs (32 bytes)
+    - nLockTime (4 bytes LE)
+    - sighash type = 0x00000001 (4 bytes LE)
   - Taproot keypath: [ 64-byte raw Schnorr signature ]
 - Before any mutation, compute conservative maximum final size (original size + max witness per input: 113 bytes for P2WPKH, 69 bytes for Taproot). Abort with “Signed PSBT too large for buffer” if it would exceed the static buffer.
 - Insert witness stack (key 0x08) into the same in-memory buffer using exact varint serialization: varint(stack_items) || [varint(len_item) || item] for each item.
@@ -151,7 +168,7 @@ Non-Negotiable Rules (never violate these):
 
 ## Normative Appendix: fkt_compat.h Types + Build Flags
 
-```c
+'''C
 typedef unsigned char fkt_uint8_t;   /* 8 bits, always unsigned */
 typedef unsigned int  fkt_uint16_t;  /* 16 bits */
 typedef unsigned long fkt_uint32_t;  /* 32 bits on all targets */
@@ -163,8 +180,30 @@ typedef struct {
     fkt_uint32_t lo;
     fkt_int32_t  hi;
 } fkt_int64_t;
+
+/* Compile-time size assertions (ILP32 targets only) */
+typedef char fkt_uint16_size_check  [(sizeof(fkt_uint16_t) == 2) ? 1 : -1];
+typedef char fkt_uint32_size_check  [(sizeof(fkt_uint32_t) == 4) ? 1 : -1];
+typedef char fkt_int32_size_check   [(sizeof(fkt_int32_t)  == 4) ? 1 : -1];
+typedef char fkt_size_t_size_check  [(sizeof(fkt_size_t)   == 4) ? 1 : -1];
+
 Required secp256k1 build flags:
-Bash--enable-module-schnorrsig
+
+--enable-module-schnorrsig
 --enable-module-extrakeys
 --with-field=32bit
 --with-scalar=32bit
+
+**Replacement (new section):**
+
+``'markdown
+
+## fkt_int64_t Arithmetic Requirements
+
+All 64-bit amount and fee arithmetic **must** use explicit helper functions instead of direct struct access:
+
+- `fkt_u64_add`, `fkt_u64_sub`, `fkt_u64_cmp`, `fkt_u64_from_le8`
+- Negative fee detection must use unsigned comparison logic.
+- `hi` should be treated as unsigned for Bitcoin amounts (which are non-negative).
+
+
