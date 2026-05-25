@@ -1,0 +1,8 @@
+version: 0.1.0
+
+models:
+  - title: Local Maple Proxy (Kimi)
+    provider: openai
+    model: auto
+    apiBase: https://slapstick-purr-compare.ngrok-free.dev
+    apiKey: a3d994cd-44b7-be65-80ec-ea0cbb7ca522
