@@ -14,7 +14,7 @@
 
 #define FKT_PSBT_SEPARATOR  0x00   /* map terminator */
 
-/* Maximum total PSBT size: 1.5 MiB (fits in a static buffer) */
+/* Maximum total PSBT size: 1.5 MiB */
 #define FKT_PSBT_MAX_SIZE   1572864UL
 
 /* ---- documented key types for each map ---- */
@@ -22,28 +22,34 @@
 #define FKT_PSBT_GLOBAL_UNSIGNED_TX   0x00
 
 /* input */
-#define FKT_PSBT_IN_NON_WITNESS_UTXO  0x00
-#define FKT_PSBT_IN_WITNESS_UTXO      0x01
-#define FKT_PSBT_IN_FINAL_SCRIPTSIG   0x07   /* forbidden during parsing */
-#define FKT_PSBT_IN_FINAL_SCRIPTWITNESS 0x08 /* forbidden during parsing */
+#define FKT_PSBT_IN_NON_WITNESS_UTXO       0x00
+#define FKT_PSBT_IN_WITNESS_UTXO           0x01
+#define FKT_PSBT_IN_SIGHASH_TYPE           0x03
+#define FKT_PSBT_IN_REDEEM_SCRIPT          0x06
+#define FKT_PSBT_IN_FINAL_SCRIPTSIG        0x07
+#define FKT_PSBT_IN_FINAL_SCRIPTWITNESS    0x08
+#define FKT_PSBT_IN_WITNESS_SCRIPT         0x16
+#define FKT_PSBT_IN_TAP_INTERNAL_KEY       0x17
+#define FKT_PSBT_IN_TAP_MERKLE_ROOT        0x18
 
 /* output: none are recognised (refuse any key) */
+
+/* SIGHASH values we enforce */
+#define FKT_SIGHASH_ALL                    0x01
+#define FKT_SIGHASH_DEFAULT                0x00   /* Taproot */
+
+/* script type identifiers (derived from witness UTXO) */
+#define SCRIPT_TYPE_UNKNOWN                0
+#define SCRIPT_TYPE_P2WPKH                 1
+#define SCRIPT_TYPE_P2TR                   2
 
 /* -------------------------------------------------------------------------
  * Public API – parser & preview (read‑only, no secret material touched)
  * ------------------------------------------------------------------------- */
 void fkt_psbt_init(void);
-
-/* load PSBT from a binary file (returns 0 on success, -1 on failure) */
 int  fkt_psbt_load_file(const char *path);
-
-/* load PSBT from a null‑terminated Base64 string (returns 0 on success, -1 on failure) */
 int  fkt_psbt_load_base64(const char *b64_str);
-
-/* strict parse – hard‑aborts on any violation */
 void fkt_psbt_parse(void);
-
-/* human‑readable preview (txid, inputs, outputs, fee, fingerprint) */
 void fkt_psbt_preview(void);
 
 #endif /* FKT_PSBT_H */

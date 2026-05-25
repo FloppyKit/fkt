@@ -6,6 +6,134 @@
 #include <stdlib.h>       /* exit() */
 
 /* =========================================================================
+ * minimal SHA-256 implementation (public domain, C89)
+ * ========================================================================= */
+typedef struct {
+    uint32_t state[8];
+    uint64_t count;
+    uint8_t  buf[64];
+} sha256_ctx;
+
+#define ROR32(x, n)  (((x) >> (n)) | ((x) << (32 - (n))))
+#define CH(x, y, z)  (((x) & (y)) ^ (~(x) & (z)))
+#define MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
+#define SIG0(x)      (ROR32(x,  2) ^ ROR32(x, 13) ^ ROR32(x, 22))
+#define SIG1(x)      (ROR32(x,  6) ^ ROR32(x, 11) ^ ROR32(x, 25))
+#define sig0(x)      (ROR32(x,  7) ^ ROR32(x, 18) ^ ((x) >> 3))
+#define sig1(x)      (ROR32(x, 17) ^ ROR32(x, 19) ^ ((x) >> 10))
+
+static const uint32_t sha256_k[64] = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+    0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+    0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+    0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+    0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+    0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+};
+
+static void sha256_init(sha256_ctx *ctx) {
+    ctx->state[0] = 0x6a09e667;
+    ctx->state[1] = 0xbb67ae85;
+    ctx->state[2] = 0x3c6ef372;
+    ctx->state[3] = 0xa54ff53a;
+    ctx->state[4] = 0x510e527f;
+    ctx->state[5] = 0x9b05688c;
+    ctx->state[6] = 0x1f83d9ab;
+    ctx->state[7] = 0x5be0cd19;
+    ctx->count = 0;
+}
+
+static void sha256_transform(sha256_ctx *ctx, const uint8_t *data) {
+    uint32_t a, b, c, d, e, f, g, h, t1, t2;
+    uint32_t w[64];
+    int i, j;
+
+    for (i = 0, j = 0; i < 16; i++, j += 4)
+        w[i] = ((uint32_t)data[j] << 24) | ((uint32_t)data[j+1] << 16) |
+               ((uint32_t)data[j+2] << 8) | (uint32_t)data[j+3];
+    for (i = 16; i < 64; i++)
+        w[i] = sig1(w[i-2]) + w[i-7] + sig0(w[i-15]) + w[i-16];
+
+    a = ctx->state[0]; b = ctx->state[1];
+    c = ctx->state[2]; d = ctx->state[3];
+    e = ctx->state[4]; f = ctx->state[5];
+    g = ctx->state[6]; h = ctx->state[7];
+
+    for (i = 0; i < 64; i++) {
+        t1 = h + SIG1(e) + CH(e,f,g) + sha256_k[i] + w[i];
+        t2 = SIG0(a) + MAJ(a,b,c);
+        h = g; g = f; f = e; e = d + t1;
+        d = c; c = b; b = a; a = t1 + t2;
+    }
+
+    ctx->state[0] += a; ctx->state[1] += b;
+    ctx->state[2] += c; ctx->state[3] += d;
+    ctx->state[4] += e; ctx->state[5] += f;
+    ctx->state[6] += g; ctx->state[7] += h;
+}
+
+static void sha256_update(sha256_ctx *ctx, const uint8_t *data, size_t len) {
+    size_t i;
+    for (i = 0; i < len; i++) {
+        ctx->buf[ctx->count & 63] = data[i];
+        ctx->count++;
+        if ((ctx->count & 63) == 0)
+            sha256_transform(ctx, ctx->buf);
+    }
+}
+
+static void sha256_final(sha256_ctx *ctx, uint8_t digest[32]) {
+    uint64_t bits = ctx->count * 8;
+    int i;
+    uint8_t pad;
+
+    /* padding */
+    pad = 0x80;
+    sha256_update(ctx, &pad, 1);
+    while ((ctx->count & 63) != 56) {
+        pad = 0x00;
+        sha256_update(ctx, &pad, 1);
+    }
+    /* length in big-endian */
+    {
+        uint8_t len_buf[8];
+        for (i = 0; i < 8; i++)
+            len_buf[i] = (uint8_t)(bits >> (56 - 8*i));
+        sha256_update(ctx, len_buf, 8);
+    }
+    /* output */
+    for (i = 0; i < 8; i++) {
+        digest[i*4]     = (uint8_t)(ctx->state[i] >> 24);
+        digest[i*4 + 1] = (uint8_t)(ctx->state[i] >> 16);
+        digest[i*4 + 2] = (uint8_t)(ctx->state[i] >> 8);
+        digest[i*4 + 3] = (uint8_t)(ctx->state[i]);
+    }
+}
+
+static void sha256(const uint8_t *data, size_t len, uint8_t digest[32]) {
+    sha256_ctx ctx;
+    sha256_init(&ctx);
+    sha256_update(&ctx, data, len);
+    sha256_final(&ctx, digest);
+}
+
+static void dsha256(const uint8_t *data, size_t len, uint8_t digest[32]) {
+    uint8_t tmp[32];
+    sha256(data, len, tmp);
+    sha256(tmp, 32, digest);
+}
+
+/* =========================================================================
  * static working memory – no malloc, all sensitive areas zeroed after use
  * ========================================================================= */
 static uint8_t  psbt_buffer[FKT_PSBT_MAX_SIZE];
@@ -14,33 +142,43 @@ static const uint8_t *psbt_cursor;   /* current read position */
 static const uint8_t *psbt_end;      /* one past last loaded byte */
 
 /* ---- extracted transaction data for preview ---- */
-#define MAX_PSBT_ITEMS  256          /* maximum number of inputs / outputs we handle */
+#define MAX_PSBT_ITEMS  256
 
 static struct {
-    /* unsigned transaction blob (for txid & output scripts) */
     uint8_t  raw_unsigned_tx[FKT_PSBT_MAX_SIZE];
     size_t   unsigned_tx_len;
-
     int      num_inputs;
     int      num_outputs;
 
-    /* input data */
-    uint8_t  input_txid  [MAX_PSBT_ITEMS][32];   /* previous txid */
-    uint32_t input_vout  [MAX_PSBT_ITEMS];       /* output index */
-    int64_t  input_amount[MAX_PSBT_ITEMS];       /* satoshis, from UTXO data */
-    int      input_has_amount[MAX_PSBT_ITEMS];   /* 1 if amount was successfully read */
+    /* per-input data */
+    uint8_t  input_txid        [MAX_PSBT_ITEMS][32];
+    uint32_t input_vout        [MAX_PSBT_ITEMS];
+    uint32_t input_sequence    [MAX_PSBT_ITEMS];
+    int64_t  input_amount      [MAX_PSBT_ITEMS];
+    int      input_has_amount  [MAX_PSBT_ITEMS];
+    uint8_t  input_script_type [MAX_PSBT_ITEMS];   /* SCRIPT_TYPE_* */
+    uint32_t input_sighash     [MAX_PSBT_ITEMS];
+    int      input_has_sighash [MAX_PSBT_ITEMS];
+    int      input_has_tap_int_key [MAX_PSBT_ITEMS];
 
     /* output data */
     int64_t  output_amount      [MAX_PSBT_ITEMS];
-    uint8_t  output_script      [MAX_PSBT_ITEMS][520];  /* max P2WSH script */
+    uint8_t  output_script      [MAX_PSBT_ITEMS][520];
     size_t   output_script_len  [MAX_PSBT_ITEMS];
+
+    /* nLockTime from unsigned tx */
+    uint32_t locktime;
+
+    /* computed hashes */
+    uint8_t  psbt_fingerprint[32];   /* SHA256 of raw PSBT buffer */
+    uint8_t  txid[32];               /* double-SHA256 of unsigned tx */
+    int      hashes_computed;        /* flag to avoid recomputation */
 } psbt_data;
 
 /* =========================================================================
- * fatal error handler – single exit path, loud message
+ * fatal error handler
  * ========================================================================= */
-static void fkt_psbt_die(const char *msg)
-{
+static void fkt_psbt_die(const char *msg) {
     fprintf(stderr, "FKT PSBT ERROR: %s\n", msg);
     exit(1);
 }
@@ -48,14 +186,12 @@ static void fkt_psbt_die(const char *msg)
 /* =========================================================================
  * initialisation – zero static memory with volatile writes
  * ========================================================================= */
-void fkt_psbt_init(void)
-{
+void fkt_psbt_init(void) {
     volatile uint8_t *p;
     size_t i;
 
     p = (volatile uint8_t *)psbt_buffer;
     for (i = 0; i < sizeof(psbt_buffer); i++)   p[i] = 0;
-
     p = (volatile uint8_t *)&psbt_data;
     for (i = 0; i < sizeof(psbt_data); i++)     p[i] = 0;
 
@@ -65,30 +201,23 @@ void fkt_psbt_init(void)
 }
 
 /* =========================================================================
- * file loading (returns 0 on success, -1 on failure – never calls die())
+ * file loading (returns 0 on success, -1 on failure)
  * ========================================================================= */
-static int read_file(const char *path, uint8_t *buf, size_t max_size, size_t *out_size)
-{
+static int read_file(const char *path, uint8_t *buf, size_t max_size, size_t *out_size) {
     FILE *f;
     size_t n;
 
     f = fopen(path, "rb");
     if (!f) return -1;
-
     n = fread(buf, 1, max_size, f);
     if (ferror(f)) { fclose(f); return -1; }
-    if (!feof(f)) {
-        /* file too large – refuse */
-        fclose(f);
-        return -1;
-    }
+    if (!feof(f)) { fclose(f); return -1; }
     fclose(f);
     *out_size = n;
     return 0;
 }
 
-int fkt_psbt_load_file(const char *path)
-{
+int fkt_psbt_load_file(const char *path) {
     size_t size;
     if (read_file(path, psbt_buffer, FKT_PSBT_MAX_SIZE, &size) != 0)
         return -1;
@@ -99,7 +228,7 @@ int fkt_psbt_load_file(const char *path)
 }
 
 /* =========================================================================
- * strict Base64 decoder (RFC 4648, no whitespace, requires correct padding)
+ * strict Base64 decoder (unchanged)
  * ========================================================================= */
 static const uint8_t b64_decode_table[256] = {
     0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
@@ -112,8 +241,7 @@ static const uint8_t b64_decode_table[256] = {
     0x29,0x2A,0x2B,0x2C,0x2D,0x2E,0x2F,0x30,0x31,0x32,0x33,0xFF,0xFF,0xFF,0xFF,0xFF
 };
 
-static int base64_decode(const char *in, uint8_t *out, size_t max_out, size_t *out_len)
-{
+static int base64_decode(const char *in, uint8_t *out, size_t max_out, size_t *out_len) {
     size_t len = strlen(in);
     size_t i, j;
     uint32_t buf;
@@ -125,19 +253,11 @@ static int base64_decode(const char *in, uint8_t *out, size_t max_out, size_t *o
     j = 0;
     for (i = 0; i < len; i += 4) {
         buf = 0;
-        /* decode 4 characters into 3 bytes */
-        c = (uint8_t)in[i];
-        if (c == '=') { pad++; buf |= (0x00 << 18); } else { uint8_t v = b64_decode_table[c]; if (v >= 64) return -1; buf |= ((uint32_t)v << 18); }
-        c = (uint8_t)in[i+1];
-        if (c == '=') { pad++; buf |= (0x00 << 12); } else { if (pad) return -1; uint8_t v = b64_decode_table[c]; if (v >= 64) return -1; buf |= ((uint32_t)v << 12); }
-        c = (uint8_t)in[i+2];
-        if (c == '=') { pad++; buf |= (0x00 << 6);  } else { if (pad) return -1; uint8_t v = b64_decode_table[c]; if (v >= 64) return -1; buf |= ((uint32_t)v << 6);  }
-        c = (uint8_t)in[i+3];
-        if (c == '=') { pad++; /* nothing */        } else { if (pad) return -1; uint8_t v = b64_decode_table[c]; if (v >= 64) return -1; buf |= ((uint32_t)v);       }
-
-        if (pad > 2) return -1;  /* invalid padding */
-
-        /* output bytes */
+        c = (uint8_t)in[i];      if (c == '=') { pad++; buf |= (0x00 << 18); } else { uint8_t v = b64_decode_table[c]; if (v >= 64) return -1; buf |= ((uint32_t)v << 18); }
+        c = (uint8_t)in[i+1];    if (c == '=') { pad++; buf |= (0x00 << 12); } else { if (pad) return -1; uint8_t v = b64_decode_table[c]; if (v >= 64) return -1; buf |= ((uint32_t)v << 12); }
+        c = (uint8_t)in[i+2];    if (c == '=') { pad++; buf |= (0x00 << 6);  } else { if (pad) return -1; uint8_t v = b64_decode_table[c]; if (v >= 64) return -1; buf |= ((uint32_t)v << 6);  }
+        c = (uint8_t)in[i+3];    if (c == '=') { pad++; /* nothing */        } else { if (pad) return -1; uint8_t v = b64_decode_table[c]; if (v >= 64) return -1; buf |= ((uint32_t)v);       }
+        if (pad > 2) return -1;
         if (j < max_out) out[j++] = (uint8_t)(buf >> 16);
         if (pad < 2 && j < max_out) out[j++] = (uint8_t)(buf >> 8);
         if (pad < 1 && j < max_out) out[j++] = (uint8_t)(buf);
@@ -147,8 +267,7 @@ static int base64_decode(const char *in, uint8_t *out, size_t max_out, size_t *o
     return 0;
 }
 
-int fkt_psbt_load_base64(const char *b64_str)
-{
+int fkt_psbt_load_base64(const char *b64_str) {
     size_t len;
     if (base64_decode(b64_str, psbt_buffer, FKT_PSBT_MAX_SIZE, &len) != 0)
         return -1;
@@ -161,40 +280,32 @@ int fkt_psbt_load_base64(const char *b64_str)
 /* =========================================================================
  * compact-size integer helpers (strict minimal encoding)
  * ========================================================================= */
-static void ensure_bytes(size_t n)
-{
+static void ensure_bytes(size_t n) {
     if ((size_t)(psbt_end - psbt_cursor) < n)
         fkt_psbt_die("Unexpected end of PSBT data.");
 }
 
-static uint64_t read_varint(int *ok)
-{
+static uint64_t read_varint(int *ok) {
     uint8_t first;
     if (psbt_cursor >= psbt_end) { *ok = 0; return 0; }
     first = *psbt_cursor;
     if (first < 0xFD) {
-        *ok = 1;
-        psbt_cursor++;
-        return (uint64_t)first;
+        *ok = 1; psbt_cursor++; return (uint64_t)first;
     }
     if (first == 0xFD) {
         uint16_t val;
         if (psbt_end - psbt_cursor < 3) { *ok = 0; return 0; }
         val = (uint16_t)psbt_cursor[1] | ((uint16_t)psbt_cursor[2] << 8);
-        if (val < 0xFD) { *ok = 0; return 0; }       /* non‑minimal */
-        *ok = 1;
-        psbt_cursor += 3;
-        return val;
+        if (val < 0xFD) { *ok = 0; return 0; }
+        *ok = 1; psbt_cursor += 3; return val;
     }
     if (first == 0xFE) {
         uint32_t val;
         if (psbt_end - psbt_cursor < 5) { *ok = 0; return 0; }
         val = (uint32_t)psbt_cursor[1] | ((uint32_t)psbt_cursor[2] << 8) |
               ((uint32_t)psbt_cursor[3] << 16) | ((uint32_t)psbt_cursor[4] << 24);
-        if (val < 0x10000UL) { *ok = 0; return 0; }  /* non‑minimal */
-        *ok = 1;
-        psbt_cursor += 5;
-        return val;
+        if (val < 0x10000UL) { *ok = 0; return 0; }
+        *ok = 1; psbt_cursor += 5; return val;
     }
     /* first == 0xFF */
     {
@@ -204,37 +315,27 @@ static uint64_t read_varint(int *ok)
               ((uint64_t)psbt_cursor[3] << 16) | ((uint64_t)psbt_cursor[4] << 24) |
               ((uint64_t)psbt_cursor[5] << 32) | ((uint64_t)psbt_cursor[6] << 40) |
               ((uint64_t)psbt_cursor[7] << 48) | ((uint64_t)psbt_cursor[8] << 56);
-        if (val <= 0xFFFFFFFFUL) { *ok = 0; return 0; } /* non‑minimal */
-        *ok = 1;
-        psbt_cursor += 9;
-        return val;
+        if (val <= 0xFFFFFFFFUL) { *ok = 0; return 0; }
+        *ok = 1; psbt_cursor += 9; return val;
     }
 }
 
-/* ---- same, but operates on an arbitrary buffer (used for unsigned tx parsing) ---- */
-static int read_varint_from(const uint8_t **p, const uint8_t *end, uint64_t *val)
-{
+static int read_varint_from(const uint8_t **p, const uint8_t *end, uint64_t *val) {
     const uint8_t *c = *p;
     if (c >= end) return 0;
-    if (c[0] < 0xFD) {
-        *val = c[0];
-        *p = c + 1;
-        return 1;
-    }
+    if (c[0] < 0xFD) { *val = c[0]; *p = c + 1; return 1; }
     if (c[0] == 0xFD) {
         if (end - c < 3) return 0;
         *val = (uint16_t)c[1] | ((uint16_t)c[2] << 8);
         if (*val < 0xFD) return 0;
-        *p = c + 3;
-        return 1;
+        *p = c + 3; return 1;
     }
     if (c[0] == 0xFE) {
         if (end - c < 5) return 0;
         *val = (uint32_t)c[1] | ((uint32_t)c[2] << 8) |
                ((uint32_t)c[3] << 16) | ((uint32_t)c[4] << 24);
         if (*val < 0x10000UL) return 0;
-        *p = c + 5;
-        return 1;
+        *p = c + 5; return 1;
     }
     if (c[0] == 0xFF) {
         if (end - c < 9) return 0;
@@ -243,26 +344,30 @@ static int read_varint_from(const uint8_t **p, const uint8_t *end, uint64_t *val
                ((uint64_t)c[5] << 32) | ((uint64_t)c[6] << 40) |
                ((uint64_t)c[7] << 48) | ((uint64_t)c[8] << 56);
         if (*val <= 0xFFFFFFFFUL) return 0;
-        *p = c + 9;
-        return 1;
+        *p = c + 9; return 1;
     }
     return 0;
 }
 
+/* helper for reading a little‑endian 32‑bit integer */
+static uint32_t fkt_read_le32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
 /* =========================================================================
- * map entry parser – returns 0 on separator, 1 on valid entry
+ * map entry parser
  * ========================================================================= */
 static int parse_map_entry(uint8_t *key_type_out,
                            const uint8_t **key_data_out, size_t *key_data_len_out,
-                           const uint8_t **value_out, size_t *value_len_out)
-{
+                           const uint8_t **value_out, size_t *value_len_out) {
     int ok;
     uint64_t key_len, val_len;
 
     ensure_bytes(1);
     if (*psbt_cursor == FKT_PSBT_SEPARATOR) {
         psbt_cursor++;
-        return 0;   /* separator hit */
+        return 0;
     }
 
     key_len = read_varint(&ok);
@@ -286,12 +391,11 @@ static int parse_map_entry(uint8_t *key_type_out,
 }
 
 /* =========================================================================
- * key type whitelist
+ * key whitelist (updated with new keys)
  * ========================================================================= */
 typedef enum { MAP_GLOBAL, MAP_INPUT, MAP_OUTPUT } map_context_t;
 
-static void check_key_allowed(uint8_t key_type, map_context_t ctx)
-{
+static void check_key_allowed(uint8_t key_type, map_context_t ctx) {
     switch (ctx) {
     case MAP_GLOBAL:
         if (key_type != FKT_PSBT_GLOBAL_UNSIGNED_TX)
@@ -300,44 +404,50 @@ static void check_key_allowed(uint8_t key_type, map_context_t ctx)
     case MAP_INPUT:
         if (key_type != FKT_PSBT_IN_NON_WITNESS_UTXO &&
             key_type != FKT_PSBT_IN_WITNESS_UTXO &&
+            key_type != FKT_PSBT_IN_SIGHASH_TYPE &&
+            key_type != FKT_PSBT_IN_REDEEM_SCRIPT &&          /* 0x06 added */
             key_type != FKT_PSBT_IN_FINAL_SCRIPTSIG &&
-            key_type != FKT_PSBT_IN_FINAL_SCRIPTWITNESS)
+            key_type != FKT_PSBT_IN_FINAL_SCRIPTWITNESS &&
+            key_type != FKT_PSBT_IN_WITNESS_SCRIPT &&          /* 0x16 added */
+            key_type != FKT_PSBT_IN_TAP_INTERNAL_KEY &&
+            key_type != FKT_PSBT_IN_TAP_MERKLE_ROOT)
             fkt_psbt_die("Unknown key in input PSBT map.");
         break;
     case MAP_OUTPUT:
-        /* no keys allowed */
         fkt_psbt_die("Unknown key in output PSBT map.");
         break;
     }
 }
 
 /* =========================================================================
- * helper: extract amount from a previous transaction for a given vout
- * (used for non‑witness UTXO key 0x00)
+ * script detection helpers
+ * ========================================================================= */
+static int is_p2wpkh(const uint8_t *script, size_t len) {
+    return (len == 22 && script[0] == 0x00 && script[1] == 0x14);
+}
+static int is_p2tr(const uint8_t *script, size_t len) {
+    return (len == 34 && script[0] == 0x51 && script[1] == 0x20);
+}
+
+/* =========================================================================
+ * amount extraction from non-witness UTXO (previous tx)
  * ========================================================================= */
 static int extract_prevout_amount(const uint8_t *tx, size_t tx_len,
-                                  uint32_t vout, int64_t *amount_out)
-{
+                                  uint32_t vout, int64_t *amount_out) {
     const uint8_t *p = tx;
     const uint8_t *end = tx + tx_len;
-    int segwit = 0;
     uint64_t n_inputs, n_outputs, i;
     uint64_t script_len;
 
     if (end - p < 4) return -1;
     p += 4; /* version */
 
-    /* check for segwit marker + flag (0x00 0x01) */
-    if (end - p >= 2 && p[0] == 0x00 && p[1] == 0x01) {
-        segwit = 1;
-        p += 2;
-    }
+    /* segwit marker? (allowed in previous tx) */
+    if (end - p >= 2 && p[0] == 0x00 && p[1] == 0x01) p += 2;
 
-    /* input count */
     if (!read_varint_from(&p, end, &n_inputs)) return -1;
     if (n_inputs > MAX_PSBT_ITEMS) return -1;
 
-    /* skip all inputs */
     for (i = 0; i < n_inputs; i++) {
         if (end - p < 36) return -1;
         p += 36; /* txid + vout */
@@ -348,15 +458,12 @@ static int extract_prevout_amount(const uint8_t *tx, size_t tx_len,
         p += 4; /* sequence */
     }
 
-    /* output count */
     if (!read_varint_from(&p, end, &n_outputs)) return -1;
-    if (vout >= (uint32_t)n_outputs) return -1; /* index out of bounds */
+    if (vout >= (uint32_t)n_outputs) return -1;
 
-    /* scan outputs until we reach the desired one */
     for (i = 0; i < n_outputs; i++) {
         if (end - p < 8) return -1;
         if (i == vout) {
-            /* read amount (little‑endian 8 bytes) */
             uint64_t raw = (uint64_t)p[0] | ((uint64_t)p[1] << 8) |
                            ((uint64_t)p[2] << 16) | ((uint64_t)p[3] << 24) |
                            ((uint64_t)p[4] << 32) | ((uint64_t)p[5] << 40) |
@@ -364,30 +471,27 @@ static int extract_prevout_amount(const uint8_t *tx, size_t tx_len,
             *amount_out = (int64_t)raw;
             return 0;
         }
-        p += 8; /* skip amount */
+        p += 8;
         if (!read_varint_from(&p, end, &script_len)) return -1;
         if ((size_t)(end - p) < (size_t)script_len) return -1;
         p += (size_t)script_len;
     }
-    return -1; /* shouldn't get here */
+    return -1;
 }
 
 /* =========================================================================
- * parsing the unsigned transaction (global key 0x00)
+ * parse unsigned transaction (extended with sequence and locktime)
  * ========================================================================= */
-static void parse_unsigned_tx(int *num_inputs, int *num_outputs)
-{
+static void parse_unsigned_tx(int *num_inputs, int *num_outputs) {
     const uint8_t *tx   = psbt_data.raw_unsigned_tx;
     const uint8_t *end  = tx + psbt_data.unsigned_tx_len;
     uint64_t count;
     int i;
 
     if (end - tx < 4) fkt_psbt_die("Unsigned tx too short.");
+    tx += 4; /* version */
 
-    /* version */
-    tx += 4;
-
-    /* SPEC REQUIREMENT: unsigned transaction must NOT contain segwit marker+flag */
+    /* SPEC: unsigned tx must NOT contain segwit marker+flag */
     if (end - tx >= 2 && tx[0] == 0x00 && tx[1] == 0x01)
         fkt_psbt_die("Unsigned transaction contains segwit marker (must be legacy format).");
 
@@ -396,21 +500,20 @@ static void parse_unsigned_tx(int *num_inputs, int *num_outputs)
     if (count > (uint64_t)MAX_PSBT_ITEMS) fkt_psbt_die("Too many inputs in unsigned tx.");
     *num_inputs = (int)count;
 
-    /* iterate over inputs to extract outpoints and skip scripts/sequences */
     for (i = 0; i < *num_inputs; i++) {
         if (end - tx < 36) fkt_psbt_die("Unsigned tx truncated in input.");
         memcpy(psbt_data.input_txid[i], tx, 32);
-        psbt_data.input_vout[i] = (uint32_t)tx[32] | ((uint32_t)tx[33] << 8) |
-                                  ((uint32_t)tx[34] << 16) | ((uint32_t)tx[35] << 24);
+        psbt_data.input_vout[i] = fkt_read_le32(tx + 32);
         tx += 36;
-
-        /* scriptSig length */
+        /* scriptSig length (must be 0) – we only check presence */
         if (!read_varint_from(&tx, end, &count)) fkt_psbt_die("Malformed scriptSig length.");
         if ((size_t)(end - tx) < (size_t)count) fkt_psbt_die("Unsigned tx scriptSig overrun.");
+        if (count != 0)
+            fkt_psbt_die("Unsigned tx has non-empty scriptSig (segwit inputs must have empty scriptSig).");
         tx += (size_t)count;
-
         /* sequence */
         if (end - tx < 4) fkt_psbt_die("Unsigned tx missing sequence.");
+        psbt_data.input_sequence[i] = fkt_read_le32(tx);
         tx += 4;
     }
 
@@ -419,11 +522,9 @@ static void parse_unsigned_tx(int *num_inputs, int *num_outputs)
     if (count > (uint64_t)MAX_PSBT_ITEMS) fkt_psbt_die("Too many outputs.");
     *num_outputs = (int)count;
 
-    /* parse outputs */
     for (i = 0; i < *num_outputs; i++) {
         int64_t amount;
         uint64_t script_len;
-
         if (end - tx < 8) fkt_psbt_die("Unsigned tx truncated in output amount.");
         amount = (int64_t)((uint64_t)tx[0] | ((uint64_t)tx[1] << 8) |
                            ((uint64_t)tx[2] << 16) | ((uint64_t)tx[3] << 24) |
@@ -431,7 +532,6 @@ static void parse_unsigned_tx(int *num_inputs, int *num_outputs)
                            ((uint64_t)tx[6] << 48) | ((uint64_t)tx[7] << 56));
         psbt_data.output_amount[i] = amount;
         tx += 8;
-
         if (!read_varint_from(&tx, end, &script_len)) fkt_psbt_die("Malformed output script length.");
         if (script_len > 520) fkt_psbt_die("Output script too long.");
         if ((size_t)(end - tx) < (size_t)script_len) fkt_psbt_die("Unsigned tx output script overrun.");
@@ -442,13 +542,13 @@ static void parse_unsigned_tx(int *num_inputs, int *num_outputs)
 
     /* locktime */
     if (end - tx != 4) fkt_psbt_die("Unsigned tx extra bytes or missing locktime.");
+    psbt_data.locktime = fkt_read_le32(tx);
 }
 
 /* =========================================================================
- * parse global map, input maps, output maps
+ * parse global map
  * ========================================================================= */
-static void parse_global_map(int *num_inputs, int *num_outputs)
-{
+static void parse_global_map(int *num_inputs, int *num_outputs) {
     int has_unsigned_tx = 0;
     uint8_t key_type;
     const uint8_t *key_data, *value;
@@ -457,9 +557,8 @@ static void parse_global_map(int *num_inputs, int *num_outputs)
     while (1) {
         if (!parse_map_entry(&key_type, &key_data, &key_data_len,
                              &value, &value_len))
-            break;   /* separator */
+            break;
         check_key_allowed(key_type, MAP_GLOBAL);
-
         if (key_type == FKT_PSBT_GLOBAL_UNSIGNED_TX) {
             if (has_unsigned_tx) fkt_psbt_die("Duplicate unsigned tx in global map.");
             if (value_len > sizeof(psbt_data.raw_unsigned_tx))
@@ -469,47 +568,65 @@ static void parse_global_map(int *num_inputs, int *num_outputs)
             has_unsigned_tx = 1;
         }
     }
-
-    if (!has_unsigned_tx)
-        fkt_psbt_die("Missing unsigned transaction in global map.");
-
-    /* now extract input/output counts and output data */
+    if (!has_unsigned_tx) fkt_psbt_die("Missing unsigned transaction in global map.");
     parse_unsigned_tx(num_inputs, num_outputs);
 }
 
-static void parse_inputs(int expected_inputs)
-{
+/* =========================================================================
+ * strict validation for PSBT_IN_TAP_BIP32_DERIVATION (key 0x16)
+ * format: 1 byte num_leaf_hashes (0–256) + (num_leaf_hashes * 32) leaf hashes
+ *          + 4 fingerprint + 20 derivation path
+ * ========================================================================= */
+static void fkt_validate_tap_bip32_derivation(const uint8_t *value,
+                                               size_t value_len) {
+    uint8_t num_leaf_hashes;
+    size_t expected_len;
+
+    if (value_len < 1)
+        fkt_psbt_die("Malformed PSBT_IN_TAP_BIP32_DERIVATION value");
+
+    num_leaf_hashes = value[0];
+    /* 1 + num_leaf_hashes*32 + 24 */
+    expected_len = 1 + ((size_t)num_leaf_hashes * 32) + 24;
+    if (value_len != expected_len)
+        fkt_psbt_die("Malformed PSBT_IN_TAP_BIP32_DERIVATION value");
+}
+
+/* =========================================================================
+ * parse input maps (with new key handling)
+ * ========================================================================= */
+static void parse_inputs(int expected_inputs) {
     int i;
     uint8_t key_type;
     const uint8_t *key_data, *value;
     size_t key_data_len, value_len;
 
-    /* duplicate outpoint detection – linear scan (fine for ≤256) */
     struct { uint8_t txid[32]; uint32_t vout; } seen[MAX_PSBT_ITEMS];
     int num_seen = 0;
 
     for (i = 0; i < expected_inputs; i++) {
         int has_non_witness = 0, has_witness = 0;
         int amount_found = 0;
+        uint8_t script_type = SCRIPT_TYPE_UNKNOWN;
+        int has_merkle_root = 0;   /* guard: Taproot inputs may not carry a script tree */
 
         while (1) {
             if (!parse_map_entry(&key_type, &key_data, &key_data_len,
                                  &value, &value_len))
-                break;   /* separator after this input map */
+                break;   /* separator */
 
-            /* immediately reject finalized fields that indicate a signed PSBT */
+            /* reject finalized data if present */
             if ((key_type == FKT_PSBT_IN_FINAL_SCRIPTSIG ||
                  key_type == FKT_PSBT_IN_FINAL_SCRIPTWITNESS) && value_len > 0)
                 fkt_psbt_die("PSBT already contains finalized witness/scriptsig data.");
 
             check_key_allowed(key_type, MAP_INPUT);
 
-            if (key_type == FKT_PSBT_IN_NON_WITNESS_UTXO) {
+            switch (key_type) {
+            case FKT_PSBT_IN_NON_WITNESS_UTXO:
                 if (has_witness) fkt_psbt_die("Conflicting UTXO data (both non-witness and witness).");
                 if (has_non_witness) fkt_psbt_die("Duplicate non-witness UTXO in input.");
                 has_non_witness = 1;
-
-                /* parse the previous transaction to extract the output amount */
                 {
                     int64_t amt;
                     if (extract_prevout_amount(value, value_len,
@@ -518,42 +635,80 @@ static void parse_inputs(int expected_inputs)
                     psbt_data.input_amount[i] = amt;
                     amount_found = 1;
                 }
-            } else if (key_type == FKT_PSBT_IN_WITNESS_UTXO) {
-                if (has_non_witness) fkt_psbt_die("Conflicting UTXO data (both witness and non-witness).");
+                break;
+
+            case FKT_PSBT_IN_WITNESS_UTXO:
+                if (has_non_witness) fkt_psbt_die("Conflicting UTXO data.");
                 if (has_witness) fkt_psbt_die("Duplicate witness UTXO in input.");
                 has_witness = 1;
-
-                /* witness UTXO: 8-byte amount (LE) + scriptPubKey */
                 if (value_len < 8) fkt_psbt_die("Witness UTXO value too short.");
                 {
                     size_t script_len = value_len - 8;
-                    if (script_len > 520)
-                        fkt_psbt_die("Witness UTXO scriptPubKey exceeds 520 bytes.");
-                    /* read amount */
-                    {
-                        const uint8_t *vp = value;
-                        int64_t amt = (int64_t)((uint64_t)vp[0] | ((uint64_t)vp[1] << 8) |
-                                                ((uint64_t)vp[2] << 16) | ((uint64_t)vp[3] << 24) |
-                                                ((uint64_t)vp[4] << 32) | ((uint64_t)vp[5] << 40) |
-                                                ((uint64_t)vp[6] << 48) | ((uint64_t)vp[7] << 56));
-                        psbt_data.input_amount[i] = amt;
-                        amount_found = 1;
-                    }
+                    if (script_len > 520) fkt_psbt_die("Witness UTXO scriptPubKey exceeds 520 bytes.");
+                    psbt_data.input_amount[i] = (int64_t)(
+                        (uint64_t)value[0] | ((uint64_t)value[1] << 8) |
+                        ((uint64_t)value[2] << 16) | ((uint64_t)value[3] << 24) |
+                        ((uint64_t)value[4] << 32) | ((uint64_t)value[5] << 40) |
+                        ((uint64_t)value[6] << 48) | ((uint64_t)value[7] << 56));
+                    amount_found = 1;
+                    if (is_p2wpkh(value + 8, script_len))
+                        script_type = SCRIPT_TYPE_P2WPKH;
+                    else if (is_p2tr(value + 8, script_len))
+                        script_type = SCRIPT_TYPE_P2TR;
                 }
+                break;
+
+            case FKT_PSBT_IN_SIGHASH_TYPE:
+                if (value_len != 4)
+                    fkt_psbt_die("SIGHASH_TYPE value must be exactly 4 bytes.");
+                psbt_data.input_sighash[i] = fkt_read_le32(value);
+                psbt_data.input_has_sighash[i] = 1;
+                break;
+
+            case FKT_PSBT_IN_REDEEM_SCRIPT:   /* key 0x06 – BIP32 derivation */
+                if (value_len != 24)
+                    fkt_psbt_die("BIP32 derivation key (0x06) has invalid length (must be 24 bytes)");
+                /* we do not store or use this data in V0.1 */
+                break;
+
+            case FKT_PSBT_IN_WITNESS_SCRIPT:  /* key 0x16 – Taproot BIP32 derivation */
+                fkt_validate_tap_bip32_derivation(value, value_len);
+                break;
+
+            case FKT_PSBT_IN_TAP_INTERNAL_KEY:
+                if (value_len != 32)
+                    fkt_psbt_die("TAP_INTERNAL_KEY value must be exactly 32 bytes.");
+                psbt_data.input_has_tap_int_key[i] = 1;
+                break;
+
+            case FKT_PSBT_IN_TAP_MERKLE_ROOT:
+                if (value_len != 32)
+                    fkt_psbt_die("TAP_MERKLE_ROOT value must be exactly 32 bytes.");
+                has_merkle_root = 1;
+                break;
+
+            /* keys 0x07, 0x08 handled above (reject non‑empty) */
+            default:
+                break;
             }
-            /* ignore other allowed keys (0x07,0x08 empty) */
         }
 
-        psbt_data.input_has_amount[i] = amount_found;
+        /* --- post‑input‑map checks --- */
 
-        /* duplicate outpoint check */
+        psbt_data.input_has_amount[i] = amount_found;
+        psbt_data.input_script_type[i] = script_type;
+
+        /* V0.1 only supports key‑path spending for Taproot inputs */
+        if (script_type == SCRIPT_TYPE_P2TR && has_merkle_root)
+            fkt_psbt_die("Taproot input has script tree (0x18) — V0.1 only supports keypath spending");
+
+        /* duplicate outpoint detection (unchanged) */
         {
             int j;
             for (j = 0; j < num_seen; j++) {
                 if (memcmp(seen[j].txid, psbt_data.input_txid[i], 32) == 0 &&
-                    seen[j].vout == psbt_data.input_vout[i]) {
+                    seen[j].vout == psbt_data.input_vout[i])
                     fkt_psbt_die("Duplicate outpoint detected.");
-                }
             }
             memcpy(seen[num_seen].txid, psbt_data.input_txid[i], 32);
             seen[num_seen].vout = psbt_data.input_vout[i];
@@ -562,8 +717,82 @@ static void parse_inputs(int expected_inputs)
     }
 }
 
-static void parse_outputs(int expected_outputs)
-{
+/* =========================================================================
+ * post‑parse validations
+ * ========================================================================= */
+static void validate_sighash_types(int num_inputs) {
+    int i;
+    for (i = 0; i < num_inputs; i++) {
+        uint8_t st = psbt_data.input_script_type[i];
+        if (st == SCRIPT_TYPE_UNKNOWN) {
+            /* if SIGHASH_TYPE present, we cannot allow it without known script type */
+            if (psbt_data.input_has_sighash[i])
+                fkt_psbt_die("SIGHASH_TYPE present but script type unknown (unsupported input).");
+            continue;
+        }
+        if (st == SCRIPT_TYPE_P2WPKH) {
+            uint32_t val = psbt_data.input_has_sighash[i] ? psbt_data.input_sighash[i] : FKT_SIGHASH_ALL;
+            if (val != FKT_SIGHASH_ALL)
+                fkt_psbt_die("Invalid SIGHASH_TYPE for P2WPKH (must be 0x01 or absent).");
+        } else if (st == SCRIPT_TYPE_P2TR) {
+            uint32_t val = psbt_data.input_has_sighash[i] ? psbt_data.input_sighash[i] : FKT_SIGHASH_DEFAULT;
+            if (val != FKT_SIGHASH_DEFAULT)
+                fkt_psbt_die("Invalid SIGHASH_TYPE for Taproot (must be 0x00 or absent).");
+        }
+    }
+}
+
+static void enforce_taproot_internal_key(int num_inputs) {
+    int i;
+    for (i = 0; i < num_inputs; i++) {
+        if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2TR) {
+            if (!psbt_data.input_has_tap_int_key[i])
+                fkt_psbt_die("Taproot input missing PSBT_IN_TAP_INTERNAL_KEY");
+        }
+    }
+}
+
+static void fee_safety_check(void) {
+    int i;
+    int64_t total_in = 0, total_out = 0;
+    int64_t fee;
+    size_t total_witness_bytes = 0;
+    size_t weight, vbytes;
+
+    for (i = 0; i < psbt_data.num_inputs; i++) {
+        if (!psbt_data.input_has_amount[i])
+            fkt_psbt_die("Cannot compute fee: missing input amount.");
+        total_in += psbt_data.input_amount[i];
+    }
+    for (i = 0; i < psbt_data.num_outputs; i++)
+        total_out += psbt_data.output_amount[i];
+
+    if (total_in < total_out)
+        fkt_psbt_die("Total input amount less than total output amount.");
+    fee = total_in - total_out;
+
+    /* estimate witness size */
+    for (i = 0; i < psbt_data.num_inputs; i++) {
+        uint8_t st = psbt_data.input_script_type[i];
+        if (st == SCRIPT_TYPE_P2WPKH)
+            total_witness_bytes += 109;   /* 2 stack items: sig (~73+1) + pubkey (33+1) + count(1) */
+        else if (st == SCRIPT_TYPE_P2TR)
+            total_witness_bytes += 65;    /* 1 stack item: Schnorr sig (64+1) + count(1) */
+        else
+            fkt_psbt_die("Cannot estimate transaction weight: unsupported input script type.");
+    }
+
+    weight = psbt_data.unsigned_tx_len * 4 + total_witness_bytes;
+    vbytes = (weight + 3) / 4;   /* ceil(weight/4) */
+
+    if ((uint64_t)fee / vbytes > 10000)
+        fkt_psbt_die("Fee exceeds 10000 sat/vbyte (safety limit).");
+}
+
+/* =========================================================================
+ * parse outputs
+ * ========================================================================= */
+static void parse_outputs(int expected_outputs) {
     int i;
     uint8_t key_type;
     const uint8_t *key_data, *value;
@@ -574,7 +803,7 @@ static void parse_outputs(int expected_outputs)
             if (!parse_map_entry(&key_type, &key_data, &key_data_len,
                                  &value, &value_len))
                 break;
-            check_key_allowed(key_type, MAP_OUTPUT);  /* always fatal */
+            check_key_allowed(key_type, MAP_OUTPUT);
         }
     }
 }
@@ -582,8 +811,7 @@ static void parse_outputs(int expected_outputs)
 /* =========================================================================
  * main parse entry point
  * ========================================================================= */
-void fkt_psbt_parse(void)
-{
+void fkt_psbt_parse(void) {
     int num_inputs, num_outputs;
 
     if (psbt_cursor == NULL) fkt_psbt_die("No PSBT loaded.");
@@ -598,39 +826,60 @@ void fkt_psbt_parse(void)
         fkt_psbt_die("Invalid PSBT magic bytes.");
     psbt_cursor += 5;
 
-    /* global map (separator checked implicitly) */
     parse_global_map(&num_inputs, &num_outputs);
     psbt_data.num_inputs  = num_inputs;
     psbt_data.num_outputs = num_outputs;
 
-    /* input maps */
     parse_inputs(num_inputs);
-
-    /* output maps */
     parse_outputs(num_outputs);
 
-    /* strict: nothing left after final separator */
     if (psbt_cursor != psbt_end)
         fkt_psbt_die("Trailing data after PSBT.");
+
+    /* additional validation */
+    validate_sighash_types(num_inputs);
+    enforce_taproot_internal_key(num_inputs);
+    fee_safety_check();
+
+    /* compute hashes for preview */
+    sha256(psbt_buffer, psbt_size, psbt_data.psbt_fingerprint);
+    dsha256(psbt_data.raw_unsigned_tx, psbt_data.unsigned_tx_len, psbt_data.txid);
+    psbt_data.hashes_computed = 1;
 }
 
 /* =========================================================================
- * preview (no secret material touched)
+ * preview
  * ========================================================================= */
-void fkt_psbt_preview(void)
-{
+void fkt_psbt_preview(void) {
     int i;
     int64_t total_in = 0, total_out = 0, fee;
-    char txid_str[65]; /* placeholder */
 
-    /* TXID would be computed from raw_unsigned_tx later */
+    if (!psbt_data.hashes_computed)
+        fkt_psbt_die("Preview called before successful parse.");
+
     printf("--- FKT PSBT Preview ---\n");
-    printf("TXID: (computation pending)\n\n");
 
+    /* TXID */
+    printf("Unsigned TXID: ");
+    for (i = 0; i < 32; i++) printf("%02x", psbt_data.txid[i]);
+    printf("\n");
+
+    /* PSBT fingerprint (for confirmation) */
+    printf("PSBT fingerprint (for confirmation): ");
+    for (i = 0; i < 32; i++) printf("%02x", psbt_data.psbt_fingerprint[i]);
+    printf("\n\n");
+
+    /* nLockTime */
+    if (psbt_data.locktime > 0)
+        printf("nLockTime: %u (non‑zero – time lock active)\n\n",
+               (unsigned)psbt_data.locktime);
+    else
+        printf("nLockTime: 0\n\n");
+
+    /* inputs */
     printf("Inputs:\n");
     for (i = 0; i < psbt_data.num_inputs; i++) {
         printf("  #%d  ", i);
-        /* txid hex */
         {
             int k;
             for (k = 0; k < 32; k++) printf("%02x", psbt_data.input_txid[i][k]);
@@ -642,9 +891,13 @@ void fkt_psbt_preview(void)
         } else {
             printf("  amount: (unknown)");
         }
+        /* RBF flag */
+        if (psbt_data.input_sequence[i] <= 0xFFFFFFFDUL)
+            printf("  *** RBF‑enabled ***");
         printf("\n");
     }
 
+    /* outputs */
     printf("\nOutputs:\n");
     for (i = 0; i < psbt_data.num_outputs; i++) {
         printf("  #%d  amount: %lld sat  script: ", i,
@@ -660,7 +913,6 @@ void fkt_psbt_preview(void)
 
     fee = total_in - total_out;
     printf("\nFee: %lld sat", (long long)fee);
-    if (total_in > 0 && fee < 0)
-        printf("  *** WARNING: fee is negative ***");
-    printf("\n\nPSBT fingerprint (SHA256 of raw bytes): (pending)\n");
+    if (fee < 0) printf("  *** WARNING: negative fee ***");
+    printf("\n");
 }
