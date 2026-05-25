@@ -151,6 +151,7 @@ Non-Negotiable Rules (never violate these):
 
 ## Normative Appendix: fkt_compat.h Types + Build Flags
 
+```c
 typedef unsigned char fkt_uint8_t;   /* 8 bits, always unsigned */
 typedef unsigned int  fkt_uint16_t;  /* 16 bits */
 typedef unsigned long fkt_uint32_t;  /* 32 bits on all targets */
@@ -162,11 +163,8 @@ typedef struct {
     fkt_uint32_t lo;
     fkt_int32_t  hi;
 } fkt_int64_t;
-
 Required secp256k1 build flags:
-
---enable-module-schnorrsig
+Bash--enable-module-schnorrsig
 --enable-module-extrakeys
 --with-field=32bit
 --with-scalar=32bit
-
