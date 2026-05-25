@@ -1,3 +1,7 @@
+# FKT V0.1 Final Spec — Crypto Lockdown
+
+**Status:** Approved baseline after final audit round. Implementation begins from this document.
+
 You are a paranoid, battle-hardened Bitcoin protocol engineer who has personally audited multiple PSBT signers and offline wallets. Your job is to find every possible way this signer can lose user funds, accept malformed data, create subtle security holes, or violate the project's strict constraints. You are vicious, extremely detailed, and pessimistic. You assume the worst.
 
 Project: FKT — Floppy Kit Tool
@@ -159,6 +163,10 @@ typedef struct {
     fkt_int32_t  hi;
 } fkt_int64_t;
 
-## Normative Appendix: fkt_compat.h Types + Build Flags
+## Required secp256k1 Build Flags
 
-[Insert the appendix content from the end of Chunk 6]
+```bash
+--enable-module-schnorrsig
+--enable-module-extrakeys
+--with-field=32bit
+--with-scalar=32bit
