@@ -149,24 +149,24 @@ Non-Negotiable Rules (never violate these):
 - All comments must use /* ... */. No // comments. No inline functions. Variable declarations at the top of each block only.
 - FKT V0.1 produces a signer-role PSBT. Key 0x08 is added; no other keys are removed. Downstream tools must finalize and extract before broadcasting.
 
-**NORMATIVE APPENDIX: fkt_compat.h TYPES**
-```c
-typedef unsigned char      fkt_uint8_t;   /* 8 bits, always unsigned */
-typedef unsigned int       fkt_uint16_t;  /* 16 bits */
-typedef unsigned long      fkt_uint32_t;  /* 32 bits on all targets  */
-typedef long               fkt_int32_t;   /* 32 bits signed          */
-typedef unsigned long      fkt_size_t;    /* must hold 1,572,864     */
+## Normative Appendix: fkt_compat.h Types + Build Flags
 
-/* 64-bit type for amount arithmetic on 16/32-bit targets: */
+typedef unsigned char fkt_uint8_t;   /* 8 bits, always unsigned */
+typedef unsigned int  fkt_uint16_t;  /* 16 bits */
+typedef unsigned long fkt_uint32_t;  /* 32 bits on all targets */
+typedef long          fkt_int32_t;   /* 32 bits signed */
+typedef unsigned long fkt_size_t;    /* must hold 1,572,864 */
+
+/* 64-bit type for amount arithmetic on 16/32-bit targets */
 typedef struct {
     fkt_uint32_t lo;
     fkt_int32_t  hi;
 } fkt_int64_t;
 
-## Required secp256k1 Build Flags
+Required secp256k1 build flags:
 
-```bash
 --enable-module-schnorrsig
 --enable-module-extrakeys
 --with-field=32bit
 --with-scalar=32bit
+
