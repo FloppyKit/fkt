@@ -112,7 +112,7 @@ Non-Negotiable Rules (never violate these):
     - nSequence (4 bytes LE)
     - hashOutputs (32 bytes)
     - nLockTime (4 bytes LE)
-    - sighash type = 0x01 (SIGHASH_ALL)
+    - sighash type = 0x00000001 (4 bytes LE)
   - Taproot keypath → BIP341 sighash (with explicit preimage fields):
     - epoch = 0x00 (first byte, always)
     - hash_type = 0x00 (SIGHASH_DEFAULT for Taproot keypath)
@@ -158,7 +158,7 @@ Non-Negotiable Rules (never violate these):
 
 ## Normative Appendix: fkt_compat.h Types + Build Flags
 
-'''C
+```c
 typedef unsigned char fkt_uint8_t;   /* 8 bits, always unsigned */
 typedef unsigned int  fkt_uint16_t;  /* 16 bits */
 typedef unsigned long fkt_uint32_t;  /* 32 bits on all targets */
@@ -171,11 +171,11 @@ typedef struct {
     fkt_int32_t  hi;
 } fkt_int64_t;
 
-/* Compile-time size assertions (ILP32 targets only) */
-typedef char fkt_uint16_size_check  [(sizeof(fkt_uint16_t) == 2) ? 1 : -1];
-typedef char fkt_uint32_size_check  [(sizeof(fkt_uint32_t) == 4) ? 1 : -1];
-typedef char fkt_int32_size_check   [(sizeof(fkt_int32_t)  == 4) ? 1 : -1];
-typedef char fkt_size_t_size_check  [(sizeof(fkt_size_t)   == 4) ? 1 : -1];
+/* Compile-time size assertions (ILP32 targets) */
+typedef char fkt_uint16_size_check[(sizeof(fkt_uint16_t) == 2) ? 1 : -1];
+typedef char fkt_uint32_size_check[(sizeof(fkt_uint32_t) == 4) ? 1 : -1];
+typedef char fkt_int32_size_check [(sizeof(fkt_int32_t)  == 4) ? 1 : -1];
+typedef char fkt_size_t_size_check [(sizeof(fkt_size_t)   == 4) ? 1 : -1];
 
 Required secp256k1 build flags:
 
@@ -188,12 +188,9 @@ Required secp256k1 build flags:
 
 ``'markdown
 
-## fkt_int64_t Arithmetic Requirements
+fkt_int64_t Arithmetic Requirements
+All 64-bit amount and fee arithmetic must use explicit helper functions instead of direct struct access:
 
-All 64-bit amount and fee arithmetic **must** use explicit helper functions instead of direct struct access:
-
-- `fkt_u64_add`, `fkt_u64_sub`, `fkt_u64_cmp`, `fkt_u64_from_le8`
-- Negative fee detection must use unsigned comparison logic.
-- `hi` should be treated as unsigned for Bitcoin amounts (which are non-negative).
-
-
+fkt_u64_add, fkt_u64_sub, fkt_u64_cmp, fkt_u64_from_le8
+Negative fee detection must use unsigned comparison logic.
+hi should be treated as unsigned for Bitcoin amounts (which are non-negative).
