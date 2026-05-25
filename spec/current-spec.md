@@ -135,17 +135,7 @@ Non-Negotiable Rules (never violate these):
 - Sign (ECDSA with RFC6979 deterministic nonces; Schnorr with built-in BIP340 deterministic nonce). For Taproot, the child_priv is tweaked with the BIP341 tweak before signing. After tweaking, verify the resulting private key is valid (non-zero and < curve order). Abort on failure.
 - BIP340 Schnorr signing uses the deterministic fallback with all-zero auxiliary randomness (a 32-byte zero array), per BIP340 §signing. No entropy source is required or used.
 - Build witness stack:
-    - P2WPKH → BIP143 sighash (with explicit preimage fields):
-    - nVersion (4 bytes LE)
-    - hashPrevouts (32 bytes)
-    - hashSequence (32 bytes)
-    - outpoint (36 bytes)
-    - scriptCode (0x19 0x76 0xa9 0x14 <20-byte hash160 from witness_utxo scriptPubKey bytes [2..21]> 0x88 0xac)
-    - amount (8 bytes LE)
-    - nSequence (4 bytes LE)
-    - hashOutputs (32 bytes)
-    - nLockTime (4 bytes LE)
-    - sighash type = 0x00000001 (4 bytes LE)
+  - P2WPKH: [ DER_signature + 0x01 (74 bytes max), 33-byte compressed pubkey ]
   - Taproot keypath: [ 64-byte raw Schnorr signature ]
 - Before any mutation, compute conservative maximum final size (original size + max witness per input: 113 bytes for P2WPKH, 69 bytes for Taproot). Abort with “Signed PSBT too large for buffer” if it would exceed the static buffer.
 - Insert witness stack (key 0x08) into the same in-memory buffer using exact varint serialization: varint(stack_items) || [varint(len_item) || item] for each item.
