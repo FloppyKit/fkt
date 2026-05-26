@@ -247,6 +247,30 @@ User interaction timing is the only entropy source. No /dev/*random, no hardware
 
 This completes the keygen spec, including the display (words mandatory + QR optional with explicit paranoid warning and confirmation). No other major gaps in keygen for V0.1.
 
+**8. INSPECT (preview-only mode)**
+
+**Command:** `fkt inspect --file <path> | --base64 <string> | --hex <string>`
+
+- Executes the full PSBT parser and preview logic from section 2 (magic/validation, input/output walking, script type detection, fee calculation, PSBT SHA256 fingerprint, unsigned txid, nLockTime, RBF flags, address display where possible, etc.).
+- **No seed entry, no key derivation, no signing** — zero key material is ever loaded or touched. Pure read-only preview path only.
+- Same strict hard-abort rules on any malformed PSBT, bounds violation, duplicate keys, etc., as the sign path.
+- Outputs the complete preview information (same structures and formatting as the preview phase inside `sign`).
+- Extremely useful for pure air-gapped review of a PSBT received via QR or floppy from the PWA before deciding to sign.
+- Reuses all parser/preview code from section 2 with minimal additional dispatch logic. Keeps binary size impact negligible and the security model clean.
+
+**Top-level CLI surface (supported subcommands + built-ins)**
+
+The binary supports:
+- `fkt sign ...` (sections 1–6)
+- `fkt keygen` (section 7)
+- `fkt inspect` (this section 8) — preview-only; no seed required
+
+Built-in thin flags (implemented in main dispatch):
+- `--help` / `-h` — lists available subcommands and basic usage
+- `--version` — prints clean version string
+
+All paths share the single cleanup/volatile-zero exit (section 6 + keygen reuse).
+
 ## Normative Appendix: fkt_compat.h Types + Build Flags
 
 ```c
