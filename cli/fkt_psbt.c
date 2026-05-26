@@ -5,6 +5,119 @@
 #include <string.h>
 #include <stdlib.h>       /* exit() */
 
+/* -------------------------------------------------------------------------
+ * Additional key types found in real‑world PSBTs
+ * ------------------------------------------------------------------------- */
+#define FKT_PSBT_IN_PARTIAL_SIG         0x02
+#define FKT_PSBT_IN_PROPRIETARY         0xFC
+
+/* -------------------------------------------------------------------------
+ * Extended script‑type identifiers (used for sighash / fee estimation)
+ * ------------------------------------------------------------------------- */
+#define SCRIPT_TYPE_P2WSH               3
+#define SCRIPT_TYPE_P2SH                4
+
+/* =========================================================================
+ * minimal SHA-256 implementation (public domain, C89)
+ * ========================================================================= */
+typedef struct {
+    uint32_t state[8];
+    uint64_t count;
+    uint8_t  buf[64];
+} sha256_ctx;
+
+#define ROR32(x, n)  (((x) >> (n)) | ((x) << (32 - (n))))
+#define CH(x, y, z)  (((x) & (y)) ^ (~(x) & (z)))
+#define MAJ(x, y, z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
+#define SIG0(x)      (ROR32(x,  2) ^ ROR32(x, 13) ^ ROR32(x, 22))
+#define SIG1(x)      (ROR32(x,  6) ^ ROR32(x, 11) ^ ROR32(x, 25))
+#define sig0(x)      (ROR32(x,  7) ^ ROR32(x, 18) ^ ((x) >> 3))
+#define sig1(x)      (ROR32(x, 17) ^ ROR32(x, 19) ^ ((x) >> 10))
+
+static const uint32_t sha256_k[64] = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+    0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+    0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+    0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+    0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+    0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+    0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+    0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+};
+
+static void sha256_init(sha256_ctx *ctx) {
+    ctx->state[0] = 0x6a09e667; ctx->state[1] = 0xbb67ae85;
+    ctx->state[2] = 0x3c6ef372; ctx->state[3] = 0xa54ff53a;
+    ctx->state[4] = 0x510e527f; ctx->state[5] = 0x9b05688c;
+    ctx->state[6] = 0x1f83d9ab; ctx->state[7] = 0x5be0cd19;
+    ctx->count = 0;
+}
+
+static void sha256_transform(sha256_ctx *ctx, const uint8_t *data) {
+    uint32_t a, b, c, d, e, f, g, h, t1, t2, w[64];
+    int i, j;
+    for (i = 0, j = 0; i < 16; i++, j += 4)
+        w[i] = ((uint32_t)data[j] << 24) | ((uint32_t)data[j+1] << 16) |
+               ((uint32_t)data[j+2] << 8) | (uint32_t)data[j+3];
+    for (i = 16; i < 64; i++)
+        w[i] = sig1(w[i-2]) + w[i-7] + sig0(w[i-15]) + w[i-16];
+    a = ctx->state[0]; b = ctx->state[1]; c = ctx->state[2]; d = ctx->state[3];
+    e = ctx->state[4]; f = ctx->state[5]; g = ctx->state[6]; h = ctx->state[7];
+    for (i = 0; i < 64; i++) {
+        t1 = h + SIG1(e) + CH(e,f,g) + sha256_k[i] + w[i];
+        t2 = SIG0(a) + MAJ(a,b,c);
+        h = g; g = f; f = e; e = d + t1;
+        d = c; c = b; b = a; a = t1 + t2;
+    }
+    ctx->state[0] += a; ctx->state[1] += b; ctx->state[2] += c; ctx->state[3] += d;
+    ctx->state[4] += e; ctx->state[5] += f; ctx->state[6] += g; ctx->state[7] += h;
+}
+
+static void sha256_update(sha256_ctx *ctx, const uint8_t *data, size_t len) {
+    size_t i;
+    for (i = 0; i < len; i++) {
+        ctx->buf[ctx->count & 63] = data[i];
+        ctx->count++;
+        if ((ctx->count & 63) == 0)
+            sha256_transform(ctx, ctx->buf);
+    }
+}
+
+static void sha256_final(sha256_ctx *ctx, uint8_t digest[32]) {
+    uint64_t bits = ctx->count * 8;
+    uint8_t pad = 0x80;
+    int i;
+    sha256_update(ctx, &pad, 1);
+    while ((ctx->count & 63) != 56) { pad = 0x00; sha256_update(ctx, &pad, 1); }
+    {
+        uint8_t len_buf[8];
+        for (i = 0; i < 8; i++) len_buf[i] = (uint8_t)(bits >> (56 - 8*i));
+        sha256_update(ctx, len_buf, 8);
+    }
+    for (i = 0; i < 8; i++) {
+        digest[i*4]   = (uint8_t)(ctx->state[i] >> 24);
+        digest[i*4+1] = (uint8_t)(ctx->state[i] >> 16);
+        digest[i*4+2] = (uint8_t)(ctx->state[i] >> 8);
+        digest[i*4+3] = (uint8_t)(ctx->state[i]);
+    }
+}
+
+static void sha256(const uint8_t *data, size_t len, uint8_t digest[32]) {
+    sha256_ctx ctx; sha256_init(&ctx); sha256_update(&ctx, data, len); sha256_final(&ctx, digest);
+}
+
+static void dsha256(const uint8_t *data, size_t len, uint8_t digest[32]) {
+    uint8_t tmp[32]; sha256(data, len, tmp); sha256(tmp, 32, digest);
+}
+
 /* =========================================================================
  * static working memory – no malloc, all sensitive areas zeroed after use
  * ========================================================================= */
@@ -13,34 +126,43 @@ static size_t   psbt_size;
 static const uint8_t *psbt_cursor;   /* current read position */
 static const uint8_t *psbt_end;      /* one past last loaded byte */
 
-/* ---- extracted transaction data for preview ---- */
-#define MAX_PSBT_ITEMS  256          /* maximum number of inputs / outputs we handle */
+#define MAX_PSBT_ITEMS  256
 
 static struct {
-    /* unsigned transaction blob (for txid & output scripts) */
     uint8_t  raw_unsigned_tx[FKT_PSBT_MAX_SIZE];
     size_t   unsigned_tx_len;
-
     int      num_inputs;
     int      num_outputs;
 
-    /* input data */
-    uint8_t  input_txid  [MAX_PSBT_ITEMS][32];   /* previous txid */
-    uint32_t input_vout  [MAX_PSBT_ITEMS];       /* output index */
-    int64_t  input_amount[MAX_PSBT_ITEMS];       /* satoshis, from UTXO data */
-    int      input_has_amount[MAX_PSBT_ITEMS];   /* 1 if amount was successfully read */
+    /* per-input data */
+    uint8_t  input_txid        [MAX_PSBT_ITEMS][32];
+    uint32_t input_vout        [MAX_PSBT_ITEMS];
+    uint32_t input_sequence    [MAX_PSBT_ITEMS];
+    int64_t  input_amount      [MAX_PSBT_ITEMS];
+    int      input_has_amount  [MAX_PSBT_ITEMS];
+    uint8_t  input_script_type [MAX_PSBT_ITEMS];   /* SCRIPT_TYPE_* */
+    uint32_t input_sighash     [MAX_PSBT_ITEMS];
+    int      input_has_sighash [MAX_PSBT_ITEMS];
+    int      input_has_tap_int_key [MAX_PSBT_ITEMS];
 
     /* output data */
     int64_t  output_amount      [MAX_PSBT_ITEMS];
-    uint8_t  output_script      [MAX_PSBT_ITEMS][520];  /* max P2WSH script */
+    uint8_t  output_script      [MAX_PSBT_ITEMS][520];
     size_t   output_script_len  [MAX_PSBT_ITEMS];
+
+    /* nLockTime from unsigned tx */
+    uint32_t locktime;
+
+    /* computed hashes */
+    uint8_t  psbt_fingerprint[32];
+    uint8_t  txid[32];
+    int      hashes_computed;
 } psbt_data;
 
 /* =========================================================================
- * fatal error handler – single exit path, loud message
+ * fatal error handler
  * ========================================================================= */
-static void fkt_psbt_die(const char *msg)
-{
+static void fkt_psbt_die(const char *msg) {
     fprintf(stderr, "FKT PSBT ERROR: %s\n", msg);
     exit(1);
 }
@@ -48,50 +170,36 @@ static void fkt_psbt_die(const char *msg)
 /* =========================================================================
  * initialisation – zero static memory with volatile writes
  * ========================================================================= */
-void fkt_psbt_init(void)
-{
+void fkt_psbt_init(void) {
     volatile uint8_t *p;
     size_t i;
-
     p = (volatile uint8_t *)psbt_buffer;
     for (i = 0; i < sizeof(psbt_buffer); i++)   p[i] = 0;
-
     p = (volatile uint8_t *)&psbt_data;
     for (i = 0; i < sizeof(psbt_data); i++)     p[i] = 0;
-
     psbt_size   = 0;
     psbt_cursor = NULL;
     psbt_end    = NULL;
 }
 
 /* =========================================================================
- * file loading (returns 0 on success, -1 on failure – never calls die())
+ * file loading (returns 0 on success, -1 on failure)
  * ========================================================================= */
-static int read_file(const char *path, uint8_t *buf, size_t max_size, size_t *out_size)
-{
-    FILE *f;
-    size_t n;
-
+static int read_file(const char *path, uint8_t *buf, size_t max_size, size_t *out_size) {
+    FILE *f; size_t n;
     f = fopen(path, "rb");
     if (!f) return -1;
-
     n = fread(buf, 1, max_size, f);
     if (ferror(f)) { fclose(f); return -1; }
-    if (!feof(f)) {
-        /* file too large – refuse */
-        fclose(f);
-        return -1;
-    }
+    if (!feof(f))  { fclose(f); return -1; }
     fclose(f);
     *out_size = n;
     return 0;
 }
 
-int fkt_psbt_load_file(const char *path)
-{
+int fkt_psbt_load_file(const char *path) {
     size_t size;
-    if (read_file(path, psbt_buffer, FKT_PSBT_MAX_SIZE, &size) != 0)
-        return -1;
+    if (read_file(path, psbt_buffer, FKT_PSBT_MAX_SIZE, &size) != 0) return -1;
     psbt_size   = size;
     psbt_cursor = psbt_buffer;
     psbt_end    = psbt_buffer + size;
