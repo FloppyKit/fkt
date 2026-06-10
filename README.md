@@ -1,3 +1,13 @@
+# ⚠️ FKT — Floppy Kit (EARLY / MESSY / EXPERIMENTAL)
+
+This is pre-alpha work-in-progress code for an air-gapped Bitcoin PSBT signer.
+
+**Do not use with real funds. Do not treat as production ready.**
+
+The codebase is currently being cleaned and refactored. Expect chaos, incomplete features, and ugly structure.
+
+Feedback and brutal code review welcome.
+
 # FKT — Floppy Kit
 
 **Will it bitcoin? - Git fkt.**  

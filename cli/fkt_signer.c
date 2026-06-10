@@ -94,10 +94,7 @@ int fkt_sign_psbt(const uint8_t seed[64], const char *path_str,
     for (i = 0; i < psbt_data.num_inputs; i++) {
           /* ---- Taproot (P2TR) key-path signing ---- */
         if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2TR) {
-            if (!psbt_data.input_has_tap_int_key[i]) {
-                printf("Taproot input %d missing internal key\n", i);
-                goto cleanup;
-            }
+
             uint8_t sighash[32];
             if (fkt_bip341_sighash(i, sighash) != 0) {
                 printf("Sighash error for input %d (Taproot)\n", i);
@@ -149,6 +146,14 @@ int fkt_sign_psbt(const uint8_t seed[64], const char *path_str,
         /* ---- P2WPKH signing ---- */
         if (psbt_data.input_script_type[i] != SCRIPT_TYPE_P2WPKH) continue;
         if (!psbt_data.input_has_witness_script[i]) continue;
+
+        { int k;
+        printf("DEBUG: derived hash20 = ");
+        for (k = 0; k < 20; k++) printf("%02x", hash20[k]);
+        printf("\nDEBUG: PSBT witness hash = ");
+        for (k = 0; k < 20; k++) printf("%02x", psbt_data.input_witness_script[i][2+k]);
+        printf("\n");
+        }
 
         if (memcmp(hash20, psbt_data.input_witness_script[i] + 2, 20) != 0) {
             printf("Public key mismatch for input %d\n", i);

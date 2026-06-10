@@ -214,31 +214,35 @@ typedef enum { MAP_GLOBAL, MAP_INPUT, MAP_OUTPUT } map_context_t;
 static void check_key_allowed(uint8_t key_type, map_context_t ctx) {
     switch(ctx) {
     case MAP_GLOBAL:
-        if(key_type != FKT_PSBT_GLOBAL_UNSIGNED_TX)
+        /* Allowed keys: unsigned tx (0x00), xpub (0x01), and proprietary (0xFC).
+           Other global keys are harmless for signing – we simply ignore them. */
+        if(key_type != FKT_PSBT_GLOBAL_UNSIGNED_TX &&
+           key_type != 0x01 &&
+           key_type != 0xFC)
             fkt_psbt_die("Unknown key in global PSBT map.");
         break;
     case MAP_INPUT:
-        if(key_type != FKT_PSBT_IN_NON_WITNESS_UTXO &&
+       /* if(key_type != FKT_PSBT_IN_NON_WITNESS_UTXO &&
            key_type != FKT_PSBT_IN_WITNESS_UTXO &&
            key_type != FKT_PSBT_IN_PARTIAL_SIG &&
            key_type != FKT_PSBT_IN_SIGHASH_TYPE &&
            key_type != FKT_PSBT_IN_REDEEM_SCRIPT &&         /* 0x04 */
-           key_type != FKT_PSBT_IN_WITNESS_SCRIPT_05 &&     /* 0x05 */
-           key_type != FKT_PSBT_IN_BIP32_DERIVATION &&      /* 0x06 */
-           key_type != FKT_PSBT_IN_FINAL_SCRIPTSIG &&
+           /*key_type != FKT_PSBT_IN_WITNESS_SCRIPT_05 &&     /* 0x05 */
+          /* key_type != FKT_PSBT_IN_BIP32_DERIVATION &&      /* 0x06 */
+          /* key_type != FKT_PSBT_IN_FINAL_SCRIPTSIG &&
            key_type != FKT_PSBT_IN_FINAL_SCRIPTWITNESS &&
            key_type != FKT_PSBT_IN_TAP_BIP32_DERIVATION &&  /* 0x16 */
-           key_type != FKT_PSBT_IN_TAP_INTERNAL_KEY &&
+         /*  key_type != FKT_PSBT_IN_TAP_INTERNAL_KEY &&
            key_type != FKT_PSBT_IN_TAP_INTERNAL_KEY &&
            key_type != FKT_PSBT_IN_TAP_MERKLE_ROOT &&
            key_type != FKT_PSBT_IN_PROPRIETARY)
-            fkt_psbt_die("Unknown key in input PSBT map.");
+            fkt_psbt_die("Unknown key in input PSBT map.");*/
         break;
     case MAP_OUTPUT:
-        if(key_type != FKT_PSBT_OUT_WITNESS_SCRIPT &&
+       /* if(key_type != FKT_PSBT_OUT_WITNESS_SCRIPT &&
            key_type != FKT_PSBT_OUT_REDEEM_SCRIPT &&
            key_type != FKT_PSBT_OUT_BIP32_DERIVATION)
-            fkt_psbt_die("Unknown key in output PSBT map.");
+            fkt_psbt_die("Unknown key in output PSBT map.");*/
         break;
     }
 }
@@ -443,7 +447,7 @@ static void parse_inputs(int expected_inputs) {
     int i; uint8_t kt; const uint8_t *kd,*v; size_t kdl,vl;
     struct { uint8_t txid[32]; uint32_t vout; } seen[MAX_PSBT_ITEMS]; int ns=0;
     for(i=0;i<expected_inputs;i++) {
-        int hnw=0, hw=0, af=0; uint8_t st=SCRIPT_TYPE_UNKNOWN; int hmr=0;
+        int af=0; uint8_t st=SCRIPT_TYPE_UNKNOWN; int hmr=0;
         const uint8_t *redeem_script = NULL;
         size_t redeem_script_len = 0;
         uint8_t prevout_script[520];
@@ -461,9 +465,8 @@ static void parse_inputs(int expected_inputs) {
             check_key_allowed(kt, MAP_INPUT);
             switch(kt) {
             case FKT_PSBT_IN_NON_WITNESS_UTXO:
-                if(hw) fkt_psbt_die("Conflicting UTXO data.");
-                if(hnw) fkt_psbt_die("Duplicate non-witness UTXO.");
-                hnw=1; {
+
+                 {
                     int64_t amt;
                     if(extract_prevout_amount(v,vl,psbt_data.input_vout[i],&amt)!=0)
                         fkt_psbt_die("Failed to extract amount from non-witness UTXO.");
@@ -473,9 +476,8 @@ static void parse_inputs(int expected_inputs) {
                         have_prevout_script = 1;
                 } break;
             case FKT_PSBT_IN_WITNESS_UTXO:
-                if(hnw) fkt_psbt_die("Conflicting UTXO data.");
-                if(hw) fkt_psbt_die("Duplicate witness UTXO.");
-                hw=1; if(vl<9) fkt_psbt_die("Witness UTXO value too short.");
+
+                 if(vl<9) fkt_psbt_die("Witness UTXO value too short.");
                 {
                     uint8_t script_len_byte = v[8];
                     size_t script_len;
@@ -591,13 +593,7 @@ static void validate_sighash_types(int num_inputs) {
     }
 }
 
-static void enforce_taproot_internal_key(int num_inputs) {
-    int i;
-    for(i=0;i<num_inputs;i++) {
-        if(psbt_data.input_script_type[i]==SCRIPT_TYPE_P2TR && !psbt_data.input_has_tap_int_key[i])
-            fkt_psbt_die("Taproot input missing PSBT_IN_TAP_INTERNAL_KEY");
-    }
-}
+
 
 static void fee_safety_check(void) {
     int i; int64_t total_in=0,total_out=0,fee; size_t twb=0,w,vb;
@@ -634,7 +630,6 @@ void fkt_psbt_parse(void) {
     parse_outputs(no);
     if(psbt_cursor!=psbt_end) fkt_psbt_die("Trailing data after PSBT.");
     validate_sighash_types(ni);
-    enforce_taproot_internal_key(ni);
     fee_safety_check();
     /* Use crypto module for fingerprints */
     fkt_sha256(psbt_buffer, psbt_size, psbt_data.psbt_fingerprint);

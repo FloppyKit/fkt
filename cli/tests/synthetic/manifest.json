@@ -1,0 +1,127 @@
+[
+  {
+    "name": "p2wpkh_1in_1out",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_1in_1out.psbt"
+  },
+  {
+    "name": "p2wpkh_1in_2out",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_1in_2out.psbt"
+  },
+  {
+    "name": "p2wpkh_2in_2out",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_2in_2out.psbt"
+  },
+  {
+    "name": "p2wpkh_3in_2out",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_3in_2out.psbt"
+  },
+  {
+    "name": "p2wpkh_rbf",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_rbf.psbt"
+  },
+  {
+    "name": "p2wpkh_final_seq",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_final_seq.psbt"
+  },
+  {
+    "name": "p2wpkh_locktime",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_locktime.psbt"
+  },
+  {
+    "name": "p2wpkh_high_locktime",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_high_locktime.psbt"
+  },
+  {
+    "name": "p2wpkh_very_high_locktime",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_very_high_locktime.psbt"
+  },
+  {
+    "name": "p2wpkh_dust",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_dust.psbt"
+  },
+  {
+    "name": "p2wpkh_dust_1in_1out",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_dust_1in_1out.psbt"
+  },
+  {
+    "name": "p2wpkh_consolidate",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_consolidate.psbt"
+  },
+  {
+    "name": "p2wpkh_minimal_fee",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_minimal_fee.psbt"
+  },
+  {
+    "name": "p2wpkh_max_sequence",
+    "expected": "sign",
+    "file": "unsigned/p2wpkh_max_sequence.psbt"
+  },
+  {
+    "name": "p2tr_1in_1out",
+    "expected": "sign",
+    "file": "unsigned/p2tr_1in_1out.psbt"
+  },
+  {
+    "name": "p2tr_2in_2out",
+    "expected": "sign",
+    "file": "unsigned/p2tr_2in_2out.psbt"
+  },
+  {
+    "name": "p2tr_locktime",
+    "expected": "sign",
+    "file": "unsigned/p2tr_locktime.psbt"
+  },
+  {
+    "name": "p2tr_rbf",
+    "expected": "sign",
+    "file": "unsigned/p2tr_rbf.psbt"
+  },
+  {
+    "name": "p2tr_dust",
+    "expected": "sign",
+    "file": "unsigned/p2tr_dust.psbt"
+  },
+  {
+    "name": "p2sh_p2wpkh_1in_1out",
+    "expected": "sign",
+    "file": "unsigned/p2sh_p2wpkh_1in_1out.psbt"
+  },
+  {
+    "name": "duplicate_outpoint",
+    "expected": "reject",
+    "file": "unsigned/duplicate_outpoint.psbt"
+  },
+  {
+    "name": "p2wpkh_single",
+    "expected": "reject",
+    "file": "unsigned/p2wpkh_single.psbt"
+  },
+  {
+    "name": "p2wpkh_none",
+    "expected": "reject",
+    "file": "unsigned/p2wpkh_none.psbt"
+  },
+  {
+    "name": "p2wpkh_acp",
+    "expected": "reject",
+    "file": "unsigned/p2wpkh_acp.psbt"
+  },
+  {
+    "name": "unknown_key",
+    "expected": "reject",
+    "file": "unsigned/unknown_key.psbt"
+  }
+]
