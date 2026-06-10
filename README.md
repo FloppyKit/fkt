@@ -69,6 +69,11 @@ The v0.1–v0.4 roadmap covers the core PSBT signing suite (parsing, signing, mu
 git clone https://github.com/FloppyKit/fkt.git
 cd fkt
 make
+```
+(Build instructions will improve rapidly as we stabilize.)
+
+License
+MIT — see LICENSE
 
 ---
 Coded Proudly in C89 - Bare fucking metal Bitcoin.
