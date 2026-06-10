@@ -156,6 +156,121 @@ Non-Negotiable Rules (never violate these):
 - All comments must use /* ... */. No // comments. No inline functions. Variable declarations at the top of each block only.
 - FKT V0.1 produces a signer-role PSBT. Key 0x08 is added; no other keys are removed. Downstream tools must finalize and extract before broadcasting.
 
+
+**7. KEYGEN (companion tool in V0.1 binary)**
+
+**Note:** Keygen enables creation of new BIP39 seeds on the same retro/air-gapped hardware as the signer. It is included in the V0.1 binary as a companion (not core to "Crypto Lockdown" signing but essential for practical use). Advanced backup schemes (Shamir, encrypted exports, seed QR standards for PWA) are V0.2.
+
+**Command:** fkt keygen
+- Fully interactive only. No flags for non-interactive entropy collection (security requirement).
+- Supports 12-word (128-bit) and 24-word (256-bit) seeds. Prompt at start for choice; default 24.
+- No optional passphrase in V0.1 (matches section 3 restriction).
+
+**7.1 Entropy Collection — Dice Roll Simulation (sole source)**
+
+User interaction timing is the only entropy source. No /dev/*random, no hardware RNG, no untrusted OS calls. This is deliberate for 1992-era portability and auditability.
+
+- Clear startup banner and explanation:
+  ```
+  FKT KEYGEN — DICE ROLL ENTROPY COLLECTION
+  Timing of YOUR keypresses is the entropy. Simulated rolls are fair (SHA256-derived).
+  128 taps recommended for full 256-bit class security on typical retro hardware (conservative ~2 bits/tap after SHA mixing). 64 = Bitcoin minimum. 200–300+ = "quantum hard" overkill. Device variance is huge (Psion/486 ~1.5–3 bits/tap); progress bar is conservative — do 2× on slow hardware. More is always better.
+  Press Enter or Space to roll. Write nothing down yet.
+  ```
+- Live progress (simple text, no curses by default):
+  Rolls: 047/128   Est. bits: 094/256 (conservative)   [####------------]
+  (On very old hardware the "est. bits" is optimistic — keep rolling.)
+
+  Optional ANSI color extension (graceful fallback on dumb terminals):
+  - Bar fills normally until 128 → turns green + "Recommended 256-bit target reached".
+  - At exactly 321 rolls: bar turns orange + one short Easter egg line (e.g. "321 — ultimate quantum hard. Orange pill engaged. ₿"). This is pure personality, ~1-2 KB max added code, contained in one small function. Not security-critical. Can be compiled out with a build flag if desired.
+- On each valid keypress:
+  - Capture portable timer (clock() or platform equiv.; jitter quality documented per target).
+  - Mix timer bytes + counter into static accumulator via SHA256 update (reuse existing SHA256 handling).
+  - Visual roll = ((SHA256(accumulator state) low bits) % 6) + 1. Print "Roll: X".
+  - This guarantees uniform, unpredictable, entropy-backed visuals with no bias.
+- After 64: prompt "64 reached (Bitcoin security minimum). Type 'more' to keep rolling toward 128/256-bit or 'done' if you accept the lower bar."
+- After 128: "128 reached (full 256-bit class). Type 'more' for quantum-hard margin or 'done'."
+- Abort paths (invalid input, SIGINT): immediate volatile-zero of accumulator + exit.
+
+**7.2 Mnemonic Generation**
+
+- Select first 16 bytes (12-word) or 32 bytes (24-word) of final accumulator as raw entropy.
+- Apply exact BIP39 checksum: SHA256(entropy) → take leading (ENTROPY_BITS/32) bits.
+- Concatenate entropy || checksum → 11-bit indices → lookup in the *exact same* static BIP39 wordlist table used by section 3 seed entry (shared implementation in fkt_crypto to eliminate duplication and bugs).
+- Standard BIP39 generation only. No custom algorithms or wordlists.
+- Volatile-zero raw entropy bytes immediately after mnemonic buffer is populated.
+
+**7.3 Display, Verification, Optional QR (the display you asked about)**
+
+- Mandatory words display with extreme, multi-line warning (terminal-friendly banners):
+  ```
+  ************************************************************
+  *  YOUR SEED PHRASE — WRITE THESE WORDS ON PAPER *NOW*     *
+  *  THIS IS THE *ONLY* TIME THEY WILL BE SHOWN.             *
+  *  LOSE THE PAPER = LOSE YOUR COINS FOREVER.               *
+  *  ANYONE WHO READS OR PHOTOGRAPHS THIS OWNS YOUR BTC.     *
+  *  STORE IN MULTIPLE SECURE, OFFLINE LOCATIONS.            *
+  ************************************************************
+  ```
+  Then the words, grouped for easy transcription (e.g. 4 per line or numbered).
+
+- Mandatory verification (paranoia identical to section 3):
+  - Prompt for word-by-word re-entry with live list validation.
+  - Second full copy of the mnemonic.
+  - Constant-time memory comparison between the two buffers.
+  - Any mismatch → hard abort + volatile-zero of *all* mnemonic/accumulator buffers + "VERIFICATION FAILED. Transcription error. Start over. Memory erased."
+
+- Optional QR (default NO, explicit confirmation required):
+  - After verification success only: 
+    "Generate dense ASCII QR of seed for PWA scan / photo backup? (y/N)"
+    "WARNING: QR CONTAINS YOUR COMPLETE SEED. SCAN = ANYONE CAN STEAL FUNDS.
+    Only generate in a locked private room with zero cameras/observers.
+    This is OPTIONAL and purely for convenience. Hand transcription is safer for most."
+  - On explicit 'y': reuse the exact dense ASCII QR generator from section 6 (signed PSBT output). Encode as simple text "bip39:word1 word2 ..." (PWA can parse). Display once. Warn if QR too large for terminal.
+  - No persistence of QR data after display.
+
+- Never write seed to disk: any code path that attempts file creation/write with mnemonic material hard-aborts with loud error. Seed exists only in volatile memory and on the user's paper/QR/photo (user responsibility).
+
+**7.4 Zeroing, Cleanup & Exit**
+
+- Single shared cleanup path (reuse/extend section 6 logic) on every exit (success, fail, SIGINT, verification fail).
+- fkt_memzero (volatile, separate translation unit) erases: accumulator, all mnemonic copies, timing samples, SHA contexts, QR buffers, temporaries.
+- Final message: "Keygen complete. Clear screen. Power cycle classic hardware if possible. Your seed is now only on paper (or QR if you chose it). Re-enter it fresh each time you run 'fkt sign' (stateless design)."
+
+**7.5 Implementation & Sharing Notes**
+
+- Heavy reuse: wordlist + validation/generation logic, SHA256, constant-time compare, QR generator, BIP39 helpers, SIGINT handler, cleanup path, fkt_memzero from signer paths.
+- New: accumulator mixing + dice visual logic (small, auditable), mnemonic generation from entropy (standard BIP39, test vectors required).
+- Code size: acceptable; shares ~everything possible with signer. Still fits 1.44 MB target.
+- Platform timer quality must be documented in README/build notes (jitter on 486/Psion/etc. is the security foundation here).
+
+This completes the keygen spec, including the display (words mandatory + QR optional with explicit paranoid warning and confirmation). No other major gaps in keygen for V0.1.
+
+**8. INSPECT (preview-only mode)**
+
+**Command:** `fkt inspect --file <path> | --base64 <string> | --hex <string>`
+
+- Executes the full PSBT parser and preview logic from section 2 (magic/validation, input/output walking, script type detection, fee calculation, PSBT SHA256 fingerprint, unsigned txid, nLockTime, RBF flags, address display where possible, etc.).
+- **No seed entry, no key derivation, no signing** — zero key material is ever loaded or touched. Pure read-only preview path only.
+- Same strict hard-abort rules on any malformed PSBT, bounds violation, duplicate keys, etc., as the sign path.
+- Outputs the complete preview information (same structures and formatting as the preview phase inside `sign`).
+- Extremely useful for pure air-gapped review of a PSBT received via QR or floppy from the PWA before deciding to sign.
+- Reuses all parser/preview code from section 2 with minimal additional dispatch logic. Keeps binary size impact negligible and the security model clean.
+
+**Top-level CLI surface (supported subcommands + built-ins)**
+
+The binary supports:
+- `fkt sign ...` (sections 1–6)
+- `fkt keygen` (section 7)
+- `fkt inspect` (this section 8) — preview-only; no seed required
+
+Built-in thin flags (implemented in main dispatch):
+- `--help` / `-h` — lists available subcommands and basic usage
+- `--version` — prints clean version string
+
+All paths share the single cleanup/volatile-zero exit (section 6 + keygen reuse).
+
 ## Normative Appendix: fkt_compat.h Types + Build Flags
 
 ```c
@@ -193,4 +308,5 @@ All 64-bit amount and fee arithmetic must use explicit helper functions instead 
 
 fkt_u64_add, fkt_u64_sub, fkt_u64_cmp, fkt_u64_from_le8
 Negative fee detection must use unsigned comparison logic.
+hi should be treated as unsigned for Bitcoin amounts (which are non-negative).
 hi should be treated as unsigned for Bitcoin amounts (which are non-negative).
