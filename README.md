@@ -1,82 +1,76 @@
 # FKT — Floppy Kit
 
+> **⚠️ PRE-ALPHA / HEAVY DEVELOPMENT / TESTNET ONLY**  
+> This is early, actively changing code.  
+> **Do not use with real Bitcoin.** Testnet and dummy data only.  
+> Expect breaking changes, incomplete features, and rough edges.  
+> Feedback, test vectors, and brutal review are very welcome.
+
 **Will it bitcoin? - Git fkt.**  
 **Signing Bitcoin in 1991.**  
 **Y0UR H4RDW4R3 15 TH3 W4LL3T**
 
 ---
 
-A minimal, paranoid, air-gapped PSBT signer that runs on hardware from 1991 onward and fits on a real 1.44 MB floppy disk.
+A minimal, paranoid, air-gapped / offline PSBT signer that runs on hardware from 1991 onward and fits on a real 1.44 MB floppy disk.
 
-Your hardware is the wallet.
+**Your hardware is the wallet.**  
+The core is a completely offline signer that works anywhere you can run C — from a 486 with a floppy drive to a modern air-gapped machine.
 
-### The Three Pieces
+### The Three Pieces (Current Scope)
 
-**FKT CLI**  
-The pure air-gapped signer.  
-- Runs on a 486 (or older) from a floppy disk.  
-- Completely stateless, RAM-only, no network.  
-- Seed phrase entry with verification (four modes).  
-- Full signing support: P2WPKH, P2WSH multisig, Taproot.  
-- Outputs signed PSBT + dense scannable ASCII QR.  
+**1. FKT CLI** — The core offline signer binary  
+Pure C89 air-gapped PSBT signer. Runs on ancient hardware or any minimal environment. Stateless, RAM-only, produces signed PSBT + dense ASCII QR.
 
-**FKT PWA**  
-The modern transaction coordinator and daily driver.  
-- Single-file offline HTML, runs in any browser.  
-- Drag & drop or paste PSBT.  
-- Clean transaction preview.  
-- **Paranoid Send Mode** (wallet sweep, automatic change splitting, optional noise output).  
-- Sign directly in the PWA (WASM) or export to CLI.  
-- QR scanning and ASCII QR output.  
-- Toggleable **Debug / Educational Mode** — shows step-by-step explanations of every part of the signing process.  
+**2. FKT Bootable GUI** — The full bootable signer environment  
+Minimal Linux GUI (Tiny Core based) that boots from USB/floppy and includes the CLI signer underneath. Designed as a practical daily-driver air-gapped device.
 
-**Uncle Jim’s Relay**  
-The optional community data & broadcast layer.  
-- Provides fresh fee estimates and recent chain data to the PWA.  
-- Stores the last 180 days of transaction history (configurable).  
-- Receives signed transactions and automatically broadcasts them.  
-- Runs as a Tor-only onion service with no connection logging and dummy traffic for extra privacy.  
-- Toggle between public APIs (default) and your own local pruned node (Floresta recommended).  
+**3. FKT PWA** — The modern offline transaction coordinator  
+Single-file offline HTML app. Drag & drop PSBTs, preview, edit, and either sign directly (WASM) or export to CLI for true air-gapped signing. Includes Paranoid Send Mode and educational debug view.
 
-### Hardware Requirements
+### Current Phase: Pre-v0.1
 
-**FKT CLI (Signer)**  
-- 486 computer  
-- 3.5" 1.44 MB floppy drive (5.25" optional for extra flex)  
-- Blank floppies  
-
-**Uncle Jim’s Relay (Community Server)**  
-**Recommended:**  
-- Pentium III (800 MHz – 1.4 GHz)  
-- 512 MB – 1 GB RAM  
-- 32 GB hard drive  
-- Zip drive + at least one 100 MB Zip disk (for installation)  
-
-**Minimum:**  
-- Pentium II, 256 MB RAM, 8–16 GB drive (slower but works)
-
-### Scaling
-
-A single well-specced Pentium III can comfortably serve hundreds of users.  
-At very large scale (tens or hundreds of thousands of users), a few modern mini PCs or a small server is sufficient.
+We are still **pre-v0.1**.  
+The v0.1–v0.4 roadmap covers the core PSBT signing suite (parsing, signing, multisig, Taproot, change handling, test vectors, etc.). We are actively building toward v0.1.
 
 ### Philosophy
 
-- Stateless by default — seed is never stored unless you explicitly choose an encrypted backup (v2.0).  
-- Maximum paranoia, minimum trust.  
-- Your old junk is the wallet.  
-- Runs on hardware that existed before Bitcoin was even a concept.  
+- Stateless by default — seed is never stored unless you explicitly choose encrypted backup.
+- Maximum paranoia, minimum trust.
+- Your old (or new) hardware is the wallet.
+- Runs on hardware that existed before Bitcoin was even a concept.
 - This is performance art as much as software.
 
-**Key Generation & Backup (v2.0)**  
-On-device BIP39 generation with optional passphrase.  
-Optional encrypted backup (passphrase or Shamir’s Secret Sharing).
+### Key Generation & Backup
 
-### License
+- On-device BIP39 generation with optional passphrase.
+- Optional encrypted backup support (passphrase or Shamir’s Secret Sharing planned).
 
-GPL-3.0 — see [LICENSE](LICENSE)
+### Hardware Requirements
+
+**Extreme retro path (CLI + Bootable GUI):**
+- 486 computer + 3.5" 1.44 MB floppy drive (or USB boot)
+- Blank floppies / USB stick
+
+**Modern air-gapped path:**
+- Any machine you can compile/run C on + browser for the PWA
+
+### Current Status (June 2026)
+
+- Core PSBT parsing + signing working (P2WPKH, multisig, Taproot)
+- CLI binary + Bootable GUI + PWA in active development
+- Test vectors and golden files expanding
+- Still pre-v0.1 — heavy refactoring in progress
+- No mainnet support or production readiness yet
+
+### Quick Start
+
+```bash
+git clone https://github.com/FloppyKit/fkt.git
+cd fkt
+make
 
 ---
 Coded Proudly in C89 - Bare fucking metal Bitcoin.
 
--  Uncle Jim.
+
