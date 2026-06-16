@@ -21,6 +21,7 @@ int fkt_bip32_derive_child(const uint8_t parent_priv[32],
 int fkt_derive_path(const uint8_t master_priv[32],
                     const uint8_t master_chain[32],
                     const uint32_t path[5],
+                    int depth,
                     uint8_t child_priv[32],
                     uint8_t child_pub33[33]);
 

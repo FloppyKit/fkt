@@ -110,6 +110,28 @@ int fkt_sign_psbt(const uint8_t seed[64], const char *path_str,
                 printf("PSBT buffer overflow inserting Schnorr signature for input %d\n", i);
                 goto cleanup;
             }
+            /* Finalize the Taproot input: add empty scriptsig (0x07)
+               and the witness stack (0x08) */
+            {
+                uint8_t empty[1] = { 0x00 };
+
+                if (fkt_insert_input_key(i, 0x07, empty, 0) != 0) {
+                    printf("PSBT buffer overflow inserting scriptsig for input %d\n", i);
+                    goto cleanup;
+                }
+
+                /* Build witness stack: 1 item (the 64‑byte signature) */
+                uint8_t witness[66];
+                witness[0] = 0x01;
+                witness[1] = 64;
+                memcpy(witness + 2, sig, 64);
+
+                if (fkt_insert_input_key(i, 0x08, witness, 66) != 0) {
+                    printf("PSBT buffer overflow inserting witness stack for input %d\n", i);
+                    goto cleanup;
+                }
+            }
+
             signed_any = 1;
             continue;
         }
@@ -200,6 +222,150 @@ int fkt_sign_psbt(const uint8_t seed[64], const char *path_str,
 
 cleanup:
     fkt_zerobytes(child_priv, 32);
+    fkt_zerobytes(hash20, 20);
+    if (fout) fclose(fout);
+    return ok;
+}
+
+/* Sign a PSBT using a pre‑derived private key and compressed public key.
+   No BIP32 derivation is performed. */
+int fkt_sign_psbt_with_keypair(const uint8_t privkey[32],
+                               const uint8_t pubkey33[33],
+                               const char *psbt_file,
+                               const char *output_file) {
+    int i;
+    uint8_t hash20[20];
+    FILE *fout = NULL;
+    int ok = -1;
+    int signed_any = 0;
+    secp256k1_context *ctx = fkt_secp256k1_ctx();
+
+    /* 1. Parse PSBT */
+    fkt_psbt_init();
+    if (fkt_psbt_load_file(psbt_file) != 0) { printf("Failed to load PSBT.\n"); goto cleanup; }
+    fkt_psbt_parse();
+    fkt_compute_hash_caches();
+
+    /* 2. HASH160 of the provided public key */
+    fkt_hash160(pubkey33, 33, hash20);
+
+    /* 3. Process each input */
+    for (i = 0; i < psbt_data.num_inputs; i++) {
+        /* ---- Taproot (P2TR) key‑path signing ---- */
+        if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2TR) {
+            uint8_t sighash[32];
+            if (fkt_bip341_sighash(i, sighash) != 0) {
+                printf("Sighash error for input %d (Taproot)\n", i);
+                goto cleanup;
+            }
+            uint8_t sig[64];
+            int sig_len;
+            if (fkt_schnorr_sign(privkey, sighash, sig, &sig_len) != 0) {
+                printf("Schnorr signing failed for input %d\n", i);
+                goto cleanup;
+            }
+            if (fkt_insert_input_key(i, 0x13, sig, sig_len) != 0) {
+                printf("PSBT buffer overflow inserting Schnorr signature for input %d\n", i);
+                goto cleanup;
+            }
+            /* Finalize: empty scriptsig (0x07) + witness stack (0x08) */
+            {
+                uint8_t empty[1] = { 0x00 };
+                if (fkt_insert_input_key(i, 0x07, empty, 0) != 0) {
+                    printf("PSBT buffer overflow inserting scriptsig for input %d\n", i);
+                    goto cleanup;
+                }
+                uint8_t witness[66];
+                witness[0] = 0x01;
+                witness[1] = 64;
+                memcpy(witness + 2, sig, 64);
+                if (fkt_insert_input_key(i, 0x08, witness, 66) != 0) {
+                    printf("PSBT buffer overflow inserting witness stack for input %d\n", i);
+                    goto cleanup;
+                }
+            }
+            signed_any = 1;
+            continue;
+        }
+
+        /* ---- P2SH‑P2WPKH signing ---- */
+        if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2SH_P2WPKH) {
+            if (!psbt_data.input_has_redeem_script[i]) {
+                printf("P2SH‑P2WPKH input %d missing redeem script\n", i);
+                goto cleanup;
+            }
+            uint8_t sighash[32];
+            if (fkt_bip143_sighash_p2sh_p2wpkh(i, psbt_data.input_redeem_script[i], sighash) != 0) {
+                printf("Sighash error for input %d (P2SH‑P2WPKH)\n", i);
+                goto cleanup;
+            }
+            secp256k1_ecdsa_signature sig;
+            if (!secp256k1_ecdsa_sign(ctx, &sig, sighash, privkey, NULL, NULL)) {
+                printf("Signing failed for input %d (P2SH‑P2WPKH)\n", i);
+                goto cleanup;
+            }
+            uint8_t der_sig[74];
+            size_t sig_len = sizeof(der_sig);
+            if (!secp256k1_ecdsa_signature_serialize_der(ctx, der_sig, &sig_len, &sig)) {
+                printf("DER serialisation failed for input %d\n", i);
+                goto cleanup;
+            }
+            if (fkt_insert_input_key(i, 0x02, der_sig, sig_len) != 0) {
+                printf("PSBT buffer overflow inserting signature for input %d\n", i);
+                goto cleanup;
+            }
+            signed_any = 1;
+            continue;
+        }
+
+        /* ---- P2WPKH signing ---- */
+        if (psbt_data.input_script_type[i] != SCRIPT_TYPE_P2WPKH) continue;
+        if (!psbt_data.input_has_witness_script[i]) continue;
+
+        if (memcmp(hash20, psbt_data.input_witness_script[i] + 2, 20) != 0) {
+            printf("Public key mismatch for input %d\n", i);
+            goto cleanup;
+        }
+
+        {
+            uint8_t sighash[32];
+            if (fkt_bip143_sighash(i, psbt_data.input_witness_script[i], sighash) != 0) {
+                printf("Sighash error for input %d\n", i);
+                goto cleanup;
+            }
+            secp256k1_ecdsa_signature sig;
+            if (!secp256k1_ecdsa_sign(ctx, &sig, sighash, privkey, NULL, NULL)) {
+                printf("Signing failed for input %d\n", i);
+                goto cleanup;
+            }
+            uint8_t der_sig[74];
+            size_t sig_len = sizeof(der_sig);
+            if (!secp256k1_ecdsa_signature_serialize_der(ctx, der_sig, &sig_len, &sig)) {
+                printf("DER serialisation failed for input %d\n", i);
+                goto cleanup;
+            }
+            if (fkt_insert_input_key(i, 0x02, der_sig, sig_len) != 0) {
+                printf("PSBT buffer overflow inserting signature for input %d\n", i);
+                goto cleanup;
+            }
+            signed_any = 1;
+        }
+    }
+
+    if (!signed_any) {
+        printf("No inputs could be signed.\n");
+        goto cleanup;
+    }
+
+    /* 4. Write signed PSBT */
+    fout = fopen(output_file, "wb");
+    if (!fout) { printf("Cannot open output file.\n"); goto cleanup; }
+    fwrite(psbt_buffer, 1, psbt_size, fout);
+    fclose(fout);
+    fout = NULL;
+    ok = 0;
+
+cleanup:
     fkt_zerobytes(hash20, 20);
     if (fout) fclose(fout);
     return ok;

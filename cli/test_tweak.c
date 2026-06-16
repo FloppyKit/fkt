@@ -1,0 +1,36 @@
+#include <stdio.h>
+#include <string.h>
+#include <secp256k1.h>
+
+int main(void) {
+    secp256k1_context *ctx = secp256k1_context_create(SECP256K1_CONTEXT_SIGN | SECP256K1_CONTEXT_VERIFY);
+    secp256k1_pubkey pub;
+    unsigned char pub33[33] = {
+        0x03,0xaa,0x27,0xf5,0x50,0x34,0xbc,0x2f,0x78,0x84,0x40,0x68,0x57,0x9b,0x13,0x68,
+        0x7a,0x61,0x9c,0x25,0x44,0xe5,0x78,0x4b,0x28,0x3d,0x16,0x96,0x44,0x54,0x8e,0x15,
+        0xa8
+    };
+    unsigned char tweak[32] = {
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01
+    };
+    int i, ret;
+    unsigned char out[33]; size_t len = 33;
+
+    if (!secp256k1_ec_pubkey_parse(ctx, &pub, pub33, sizeof(pub33))) {
+        printf("Failed to parse pubkey\n");
+        return 1;
+    }
+    ret = secp256k1_ec_pubkey_tweak_add(ctx, &pub, tweak);
+    printf("tweak_add returned: %d (expected 1)\n", ret);
+    if (ret) {
+        secp256k1_ec_pubkey_serialize(ctx, out, &len, &pub, SECP256K1_EC_COMPRESSED);
+        printf("result: ");
+        for (i=0;i<33;i++) printf("%02x", out[i]);
+        printf("\n");
+    }
+    secp256k1_context_destroy(ctx);
+    return 0;
+}

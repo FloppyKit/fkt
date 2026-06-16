@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS = -std=c89 -Wall -Wextra -I. -I../secp256k1/include
-LDFLAGS = -L../secp256k1/.libs -lsecp256k1
+CFLAGS = -std=c89 -Wall -Wextra -I. -I/usr/include
+LDFLAGS = ../secp256k1/.libsecp256k1.a
 
 OBJS = main.o \
        fkt_error.o \
@@ -17,7 +17,7 @@ OBJS = main.o \
        fkt_signer.o
 
 fktsigner: $(OBJS)
-	$(CC) -o $@ $^ $(LDFLAGS)
+	$(CC) -o $@ $^ -lsecp256k1
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<

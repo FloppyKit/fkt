@@ -34,6 +34,23 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+        /* ---- --keypair mode: sign with a pre‑derived private key + public key ---- */
+    if (argc == 6 && strcmp(argv[1], "--keypair") == 0) {
+        uint8_t priv[32], pub[33];
+        if (hex_decode(argv[2], priv, sizeof(priv)) != 32 ||
+            hex_decode(argv[3], pub, sizeof(pub)) != 33) {
+            fprintf(stderr, "Invalid key hex.\n");
+            return 1;
+        }
+        fkt_secp256k1_init();
+        int ret = fkt_sign_psbt_with_keypair(priv, pub, argv[4], argv[5]);
+        if (ret != 0) {
+            fprintf(stderr, "Signing failed.\n");
+            return 1;
+        }
+        return 0;
+    }
+
     if (argc != 5) {
         fprintf(stderr, "Usage: %s <seed_hex> <path> <input.psbt> <output.psbt>\n", argv[0]);
         fprintf(stderr, "       %s --pubkey <seed_hex> <path>\n", argv[0]);
