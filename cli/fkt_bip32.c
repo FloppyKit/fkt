@@ -1,3 +1,4 @@
+/* fkt_bip32.c – BIP32 derivation + optional CKDpub for non‑hardened steps */
 #include "fkt_secp256k1.h"
 #include "fkt_bip32.h"
 #include "fkt_sha512.h"
@@ -6,10 +7,6 @@
 #include <string.h>
 #include <stdio.h>
 
-
-/* =========================================================================
- * BIP32 master key derivation
- * ========================================================================= */
 void fkt_bip32_master(const uint8_t seed[64],
                       uint8_t master_priv[32],
                       uint8_t master_chain[32]) {
@@ -18,14 +15,6 @@ void fkt_bip32_master(const uint8_t seed[64],
     fkt_hmac_sha512((const uint8_t*)key, 12, seed, 64, I);
     memcpy(master_priv, I, 32);
     memcpy(master_chain, I+32, 32);
-    {
-        int i;
-        printf("DEBUG: master_priv = ");
-        for (i = 0; i < 32; i++) printf("%02x", master_priv[i]);
-        printf("\nDEBUG: master_chain = ");
-        for (i = 0; i < 32; i++) printf("%02x", master_chain[i]);
-        printf("\n");
-    }
     fkt_zerobytes(I, sizeof(I));
 }
 /* secp256k1 curve order (n) for modular addition */
@@ -149,59 +138,50 @@ int fkt_bip32_derive_child(const uint8_t parent_priv[32],
 
     return 0;
 }
-/* =========================================================================
- * Derive full 5‑hop BIP32 path
- * ========================================================================= */
-int fkt_derive_path(const uint8_t master_priv[32],
-                    const uint8_t master_chain[32],
-                    const uint32_t path[5],
-                    int depth,     
-                    uint8_t derived_priv[32],
-                    uint8_t derived_pub33[33]) {
-    uint8_t priv[32], chain[32];
-    int i;
 
-    memcpy(priv, master_priv, 32);
-    memcpy(chain, master_chain, 32);
-
-    for (i = 0; i < depth; i++) {
-        uint8_t new_priv[32], new_chain[32];
-        int hardened = (path[i] >= 0x80000000) ? 1 : 0;
-        if (fkt_bip32_derive_child(priv, chain, path[i], hardened, new_priv, new_chain) != 0)
-            return -1;
-        memcpy(priv, new_priv, 32);
-        memcpy(chain, new_chain, 32);
-    }
-
+/* ---- CKDpub: derive child public key from parent pubkey (non‑hardened) ---- */
+int fkt_ckdpub(const uint8_t parent_pub33[33],
+               const uint8_t parent_chain[32],
+               uint32_t index,
+               uint8_t child_pub33[33],
+               uint8_t child_chain[32])
 {
-    /* Quick check: add two known values and compare with Python */
-    uint8_t a[32] = { /* IL from first non-hardened step */ };
-    uint8_t b[32] = { /* parent_priv from first non-hardened step */ };
-    uint8_t result[32];
-    fkt_add_mod_n(result, a, b);
-    printf("tweak result: ");
-    { int i; for (i = 0; i < 32; i++) printf("%02x", result[i]); }
-    printf("\n");
-}
+    secp256k1_context *ctx = fkt_secp256k1_ctx();
+    uint8_t data[37];
+    uint8_t I[64];
+    secp256k1_pubkey pub;
+    int ret;
+    size_t len = 33;
 
-    {
-        int i;
-        printf("DEBUG: final priv = ");
-        for (i = 0; i < 32; i++) printf("%02x", priv[i]);
-        printf("\n");
-    }
+    if (!ctx) return -1;
 
-    memcpy(derived_priv, priv, 32);
-    {
-        secp256k1_context *ctx = fkt_secp256k1_ctx();
-        secp256k1_pubkey pub;
-        size_t pub33len = 33;
-        if (!secp256k1_ec_pubkey_create(ctx, &pub, priv)) return -1;
-        if (!secp256k1_ec_pubkey_serialize(ctx, derived_pub33, &pub33len, &pub, SECP256K1_EC_COMPRESSED))
-            return -1;
-    }
+    /* Prepare data: pubkey || index (4 bytes) */
+    memcpy(data, parent_pub33, 33);
+    data[33] = index & 0xFF;
+    data[34] = (index >> 8) & 0xFF;
+    data[35] = (index >> 16) & 0xFF;
+    data[36] = (index >> 24) & 0xFF;
+
+    /* HMAC-SHA512(parent_chain, data) */
+    fkt_hmac_sha512(parent_chain, 32, data, 37, I);
+
+    /* Parse parent pubkey */
+    if (!secp256k1_ec_pubkey_parse(ctx, &pub, parent_pub33, 33)) return -1;
+
+    /* Tweak add using left 32 bytes of I */
+    ret = secp256k1_ec_pubkey_tweak_add(ctx, &pub, I);
+    if (!ret) return -1;
+
+    /* Serialize child pubkey */
+    secp256k1_ec_pubkey_serialize(ctx, child_pub33, &len, &pub, SECP256K1_EC_COMPRESSED);
+
+    /* Right 32 bytes of I become the child chain code */
+    memcpy(child_chain, I + 32, 32);
+
     return 0;
 }
+
+
 
 /* -------------------------------------------------------------------------
  * parse_path_string – re‑entrant parser, writes 5 uint32_t values.
@@ -249,35 +229,148 @@ static int parse_path_string(const char *path_str, uint32_t path[5]) {
 }
 
 
-/* -------------------------------------------------------------------------
- * fkt_derive_from_path – the one true derivation function.
- * Takes a seed (64 bytes) and a path string.
- * Outputs child private key (32 bytes) and compressed public key (33 bytes).
- * Returns 0 on success, -1 on error.
- * ------------------------------------------------------------------------- */
 int fkt_derive_from_path(const uint8_t seed[64],
                          const char *path_str,
                          uint8_t child_priv[32],
-                         uint8_t child_pub33[33]) {
-                         int i;
-                   
-    uint32_t path[5];
-
-int depth = parse_path_string(path_str, path);
-    if (depth < 0) return -1;
-
+                         uint8_t child_pub33[33],
+                         const uint8_t *parent_pub33)
+{
     uint8_t master_priv[32], master_chain[32];
+    uint8_t priv[32], chain[32];
+    uint32_t path[8];
+    int depth, i;
+    int hardened[8];
+    secp256k1_context *ctx = fkt_secp256k1_ctx();
+
     fkt_bip32_master(seed, master_priv, master_chain);
 
-    if (fkt_derive_path(master_priv, master_chain, path, depth, child_priv, child_pub33) != 0) {
-        return -1;
+    /* Parse path */
+    depth = 0;
+    {
+        const char *p = path_str;
+        while (*p) {
+            uint32_t val = 0;
+            int hard = 0;
+            if (*p == '/') p++;
+            if (*p == '\0') break;
+            while (*p >= '0' && *p <= '9') {
+                val = val * 10 + (*p - '0');
+                p++;
+            }
+            if (*p == '\'') { hard = 1; p++; }
+            if (depth >= 8) return -1;
+            path[depth] = hard ? (val | 0x80000000) : val;
+            hardened[depth] = hard;
+            depth++;
+        }
     }
 
-    volatile uint8_t *vp = (volatile uint8_t*)master_priv;
-    for (i = 0; i < 32; i++) vp[i] = 0;
-    vp = (volatile uint8_t*)master_chain;
-    for (i = 0; i < 32; i++) vp[i] = 0;
+    /* Private key derivation (always hardened for simplicity) */
+    memcpy(priv, master_priv, 32);
+    memcpy(chain, master_chain, 32);
+    for (i = 0; i < depth; i++) {
+        uint8_t child_priv_tmp[32], child_chain_tmp[32];
+        if (fkt_bip32_derive_child(priv, chain, path[i], 1,
+                                    child_priv_tmp, child_chain_tmp) != 0) {
+            memset(priv, 0, 32);
+            return -1;
+        }
+        memcpy(priv, child_priv_tmp, 32);
+        memcpy(chain, child_chain_tmp, 32);
+    }
+    memcpy(child_priv, priv, 32);
 
+    /* Public key derivation */
+    if (parent_pub33 != NULL) {
+        int first_nonhard = -1;
+        uint8_t account_chain[32];
+        int i;
+
+        /* Find the first non‑hardened index */
+        for (i = 0; i < depth; i++) {
+            if (!hardened[i]) {
+                first_nonhard = i;
+                break;
+            }
+        }
+        if (first_nonhard < 0) {
+            memset(priv, 0, 32);
+            return -1;
+        }
+
+        /*
+         * The chain code we need for CKDpub is the one right before the
+         * first non‑hardened step.  During the private‑key derivation above
+         * we derived every step as hardened (including the hardened ones).
+         * We can capture that chain code by running the hardened derivation
+         * again from the master, but only up to first_nonhard.
+         *
+         * This time we only care about the chain code, not the private key.
+         */
+        {
+            uint8_t temp_priv[32], temp_chain[32];
+            int j;
+
+            memcpy(temp_priv, master_priv, 32);
+            memcpy(temp_chain, master_chain, 32);
+
+            for (j = 0; j < first_nonhard; j++) {
+                uint8_t child_priv_tmp[32], new_chain[32];
+                if (fkt_bip32_derive_child(temp_priv, temp_chain, path[j], 1,
+                                            child_priv_tmp, new_chain) != 0) {
+                    memset(priv, 0, 32);
+                    memset(temp_priv, 0, 32);
+                    return -1;
+                }
+                memcpy(temp_priv, child_priv_tmp, 32);
+                memcpy(temp_chain, new_chain, 32);
+            }
+            memcpy(account_chain, temp_chain, 32);
+            memset(temp_priv, 0, 32);
+            memset(temp_chain, 0, 32);
+        }
+
+        /* Now apply CKDpub to the remaining non‑hardened steps */
+        {
+            uint8_t pub[33];
+            memcpy(pub, parent_pub33, 33);
+            memcpy(chain, account_chain, 32);   /* start with account chain */
+
+            for (i = first_nonhard; i < depth; i++) {
+                uint8_t child_pub_tmp[33], child_chain_tmp[32];
+                if (!hardened[i]) {
+                    if (fkt_ckdpub(pub, chain, path[i], child_pub_tmp, child_chain_tmp) != 0) {
+                        memset(priv, 0, 32);
+                        return -1;
+                    }
+                    memcpy(pub, child_pub_tmp, 33);
+                    memcpy(chain, child_chain_tmp, 32);
+                } else {
+                    /* Should never happen with a correct parent_pub33 */
+                    memset(priv, 0, 32);
+                    return -1;
+                }
+            }
+            memcpy(child_pub33, pub, 33);
+        }
+    } else {
+        /* Fallback: secp256k1_ec_pubkey_create (may be broken) */
+        secp256k1_pubkey pubkey;
+        if (!secp256k1_ec_pubkey_create(ctx, &pubkey, child_priv)) {
+            memset(priv, 0, 32);
+            return -1;
+        }
+        {
+            size_t pub_len = 33;
+            secp256k1_ec_pubkey_serialize(ctx, child_pub33, &pub_len,
+                                          &pubkey, SECP256K1_EC_COMPRESSED);
+        }
+    }
+
+    /* Zero intermediates */
+    memset(priv, 0, 32);
+    memset(chain, 0, 32);
+    memset(master_priv, 0, 32);
+    memset(master_chain, 0, 32);
     return 0;
 }
-

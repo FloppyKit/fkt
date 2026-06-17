@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Invalid seed hex.\n");
             return 1;
         }
-        if (fkt_derive_from_path(seed, argv[3], child_priv, child_pub33) != 0) {
+        if (fkt_derive_from_path(seed, argv[3], child_priv, child_pub33, NULL) != 0) {
             fprintf(stderr, "Derivation failed.\n");
             return 1;
         }
@@ -33,23 +33,23 @@ int main(int argc, char **argv) {
         printf("\n");
         return 0;
     }
-
-        /* ---- --keypair mode: sign with a pre‑derived private key + public key ---- */
-    if (argc == 6 && strcmp(argv[1], "--keypair") == 0) {
-        uint8_t priv[32], pub[33];
-        if (hex_decode(argv[2], priv, sizeof(priv)) != 32 ||
-            hex_decode(argv[3], pub, sizeof(pub)) != 33) {
-            fprintf(stderr, "Invalid key hex.\n");
+    if (argc == 7 && strcmp(argv[1], "--parent-pubkey") == 0) {
+        uint8_t seed[64], pub33[33];
+        if (hex_decode(argv[2], seed, sizeof(seed)) != 64) {
+            fprintf(stderr, "Invalid seed hex.\n");
+            return 1;
+        }
+        if (hex_decode(argv[4], pub33, sizeof(pub33)) != 33) {
+            fprintf(stderr, "Invalid pubkey hex.\n");
             return 1;
         }
         fkt_secp256k1_init();
-        int ret = fkt_sign_psbt_with_keypair(priv, pub, argv[4], argv[5]);
-        if (ret != 0) {
-            fprintf(stderr, "Signing failed.\n");
-            return 1;
-        }
+        int ret = fkt_sign_psbt_with_parent(seed, argv[3], argv[5], argv[6], pub33);
+        if (ret != 0) { fprintf(stderr, "Signing failed.\n"); return 1; }
         return 0;
     }
+        /* ---- --keypair mode: sign with a pre‑derived private key + public key ---- */
+
 
     if (argc != 5) {
         fprintf(stderr, "Usage: %s <seed_hex> <path> <input.psbt> <output.psbt>\n", argv[0]);

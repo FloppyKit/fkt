@@ -7,7 +7,7 @@ import os, subprocess, tempfile, shutil, struct, hashlib
 # ============================================================
 DEMO_SEED_HEX = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f"
 DEMO_PATH = "84'/0'/0'/0/0"
-SIGNER_BIN = os.path.join(os.path.dirname(__file__), "..", "cli", "fktsigner")
+SIGNER_BIN = os.path.join(os.path.dirname(__file__), "..", "fktsigner")
 
 # Hardcoded witness program that matches the signer's actual derivation
 # (derived HASH160 from manual test: 54ac44bb27eb81470ae0451c99550f06a2dfa8f1)

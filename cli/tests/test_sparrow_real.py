@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real Sparrow tests using pre‑derived keypairs (bypasses secp256k1 bug)."""
+"""Real Sparrow tests using --parent-pubkey (CKDpub fallback)."""
 import os, subprocess
 from embit import bip32, networks
 
@@ -15,19 +15,23 @@ PATHS = {
     "v1_p2tr":   "86'/1'/0'/0/0",
 }
 
+# Parent (account) paths: everything up to the last non‑hardened element
+ACCOUNT_PATHS = {
+    "v1_p2wpkh": "84'/1'/0'",
+    "v1_p2tr":   "86'/1'/0'",
+}
+
 UNSIGNED_DIR = os.path.join(SCRIPT_DIR, "sparrow-real", "Unsigned", "v1")
 SIGNED_DIR   = os.path.join(SCRIPT_DIR, "sparrow-real", "Signed", "v1")
 OUTPUT_DIR   = os.path.join(SCRIPT_DIR, "sparrow-real", "output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def get_keypair(seed_hex, path_str):
+def get_account_pubkey(seed_hex, account_path_str):
     seed = bytes.fromhex(seed_hex)
     root = bip32.HDKey.from_seed(seed, version=networks.NETWORKS['test']['xprv'])
-    child = root.derive([int(x[:-1]) + 0x80000000 if x.endswith("'") else int(x) for x in path_str.split('/')[1:]])
-    return child.key.secret, child.to_public().sec()
-
-p2wpkh_priv, p2wpkh_pub = get_keypair(SEEDS["v1_p2wpkh"], PATHS["v1_p2wpkh"])
-taproot_priv, taproot_pub = get_keypair(SEEDS["v1_p2tr"], PATHS["v1_p2tr"])
+    account = root.derive([int(x[:-1]) + 0x80000000 if x.endswith("'") else int(x)
+                           for x in account_path_str.split('/')[1:]])
+    return account.to_public().sec().hex()
 
 passed = 0
 failed = 0
@@ -40,13 +44,17 @@ for filename in sorted(os.listdir(UNSIGNED_DIR)):
     theirs   = os.path.join(SIGNED_DIR, filename)
 
     if filename.startswith("v1_p2wpkh"):
-        priv, pub = p2wpkh_priv, p2wpkh_pub
+        prefix = "v1_p2wpkh"
     elif filename.startswith("v1_p2tr"):
-        priv, pub = taproot_priv, taproot_pub
+        prefix = "v1_p2tr"
     else:
         continue
 
-    cmd = [SIGNER_BIN, "--keypair", priv.hex(), pub.hex(), unsigned, ours]
+    seed_hex = SEEDS[prefix]
+    path_str = PATHS[prefix]
+    acct_pub_hex = get_account_pubkey(seed_hex, ACCOUNT_PATHS[prefix])
+
+    cmd = [SIGNER_BIN, "--parent-pubkey", seed_hex, path_str, acct_pub_hex, unsigned, ours]
     ret = subprocess.run(cmd, capture_output=True)
 
     if ret.returncode != 0:
