@@ -1,1 +1,0 @@
-@/tmp/push_files/cli__fkt_psbt.c.txt
