@@ -29,7 +29,7 @@ int fkt_ckdpub(const uint8_t parent_pub33[33],
 
 int fkt_derive_path(const uint8_t master_priv[32],
                     const uint8_t master_chain[32],
-                    const uint32_t path[5],
+                    const uint32_t *path,
                     int depth,
                     uint8_t child_priv[32],
                     uint8_t child_pub33[33],
@@ -40,6 +40,13 @@ int fkt_derive_from_path(const uint8_t seed[64],
                          uint8_t child_priv[32],
                          uint8_t child_pub33[33],
                          const uint8_t *parent_pub33);
+
+int fkt_derive_from_indices(const uint8_t seed[64],
+                            const uint32_t *path,
+                            int depth,
+                            uint8_t child_priv[32],
+                            uint8_t child_pub33[33],
+                            const uint8_t *parent_pub33);
 
 #ifdef __cplusplus
 }

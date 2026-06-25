@@ -33,7 +33,11 @@ uint8_t sha_outputs[32];
 uint8_t hashOutputs[32];
 
 size_t input_separator_offsets[MAX_PSBT_ITEMS];
+size_t input_map_start_offsets[MAX_PSBT_ITEMS];
 int    input_separator_count;
+size_t output_separator_offsets[MAX_PSBT_ITEMS];
+size_t output_map_start_offsets[MAX_PSBT_ITEMS];
+int    output_separator_count;
 
 /* #### SECTION: Error handler #### */
 static void fkt_psbt_die(const char *msg) {
@@ -49,6 +53,11 @@ void fkt_psbt_init(void) {
     for(i=0;i<sizeof(psbt_data);i++) p[i]=0;
     psbt_size = 0; psbt_cursor = NULL; psbt_end = NULL;
     input_separator_count = 0;
+    output_separator_count = 0;
+    memset(input_separator_offsets, 0, sizeof(input_separator_offsets));
+    memset(input_map_start_offsets, 0, sizeof(input_map_start_offsets));
+    memset(output_separator_offsets, 0, sizeof(output_separator_offsets));
+    memset(output_map_start_offsets, 0, sizeof(output_map_start_offsets));
 }
 
 /* #### SECTION: File loader (returns 0 on success, -1 on error) #### */
@@ -434,12 +443,67 @@ static void parse_global_map(int *num_inputs, int *num_outputs) {
     parse_unsigned_tx(num_inputs, num_outputs);
 }
 
-/* #### SECTION: Validate Taproot BIP32 derivation #### */
-static void fkt_validate_tap_bip32_derivation(const uint8_t *value, size_t value_len) {
-    uint8_t n; size_t ex;
-    if(value_len < 1) fkt_psbt_die("Malformed PSBT_IN_TAP_BIP32_DERIVATION value");
-    n = value[0]; ex = 1 + ((size_t)n * 32) + 24;
-    if(value_len != ex) fkt_psbt_die("Malformed PSBT_IN_TAP_BIP32_DERIVATION value");
+static void fkt_store_derivation_path(int input_index,
+                                      const uint8_t *path_start,
+                                      size_t path_bytes) {
+    int depth;
+    int j;
+
+    if (path_bytes == 0 || (path_bytes % 4) != 0)
+        fkt_psbt_die("Malformed BIP32 derivation path.");
+    depth = (int)(path_bytes / 4);
+    if (depth < 1 || depth > 10)
+        fkt_psbt_die("BIP32 derivation path length out of range.");
+
+    psbt_data.input_deriv_depth[input_index] = depth;
+    psbt_data.input_has_deriv_path[input_index] = 1;
+    for (j = 0; j < depth; j++)
+        psbt_data.input_deriv_path[input_index][j] =
+            fkt_read_le32(path_start + (size_t)j * 4);
+}
+
+static void fkt_parse_bip32_derivation(int input_index,
+                                       const uint8_t *key_data, size_t key_data_len,
+                                       const uint8_t *value, size_t value_len) {
+    const uint8_t *path_start;
+    size_t path_bytes;
+
+    if (value_len < 4)
+        fkt_psbt_die("Malformed PSBT_IN_BIP32_DERIVATION value.");
+    if (key_data_len == 33) {
+        memcpy(psbt_data.input_deriv_parent_pub[input_index], key_data, 33);
+        psbt_data.input_has_deriv_parent_pub[input_index] = 1;
+    }
+
+    if (value_len >= 5 && value[4] <= 10 &&
+        value_len == 5 + ((size_t)value[4] * 4)) {
+        path_start = value + 5;
+        path_bytes = (size_t)value[4] * 4;
+    } else if (((value_len - 4) % 4) == 0) {
+        path_start = value + 4;
+        path_bytes = value_len - 4;
+    } else {
+        fkt_psbt_die("Malformed PSBT_IN_BIP32_DERIVATION value.");
+    }
+    fkt_store_derivation_path(input_index, path_start, path_bytes);
+}
+
+static void fkt_parse_tap_bip32_derivation(int input_index,
+                                           const uint8_t *value, size_t value_len) {
+    uint8_t n;
+    size_t off;
+    size_t path_bytes;
+
+    if (value_len < 1)
+        fkt_psbt_die("Malformed PSBT_IN_TAP_BIP32_DERIVATION value.");
+    n = value[0];
+    off = 1 + ((size_t)n * 32);
+    if (value_len < off + 4)
+        fkt_psbt_die("Malformed PSBT_IN_TAP_BIP32_DERIVATION value.");
+    path_bytes = value_len - off - 4;
+    if (path_bytes == 0 || (path_bytes % 4) != 0)
+        fkt_psbt_die("Malformed PSBT_IN_TAP_BIP32_DERIVATION value.");
+    fkt_store_derivation_path(input_index, value + off + 4, path_bytes);
 }
 
 /* #### SECTION: Parse input maps (full key handling + script-type detection) #### */
@@ -448,6 +512,7 @@ static void parse_inputs(int expected_inputs) {
     struct { uint8_t txid[32]; uint32_t vout; } seen[MAX_PSBT_ITEMS]; int ns=0;
     for(i=0;i<expected_inputs;i++) {
         int af=0; uint8_t st=SCRIPT_TYPE_UNKNOWN; int hmr=0;
+        input_map_start_offsets[i] = (size_t)(psbt_cursor - psbt_buffer);
         const uint8_t *redeem_script = NULL;
         size_t redeem_script_len = 0;
         uint8_t prevout_script[520];
@@ -524,11 +589,22 @@ static void parse_inputs(int expected_inputs) {
                     psbt_data.input_redeem_script_len[i] = vl;
                     psbt_data.input_has_redeem_script[i] = 1;
                 }
-            case FKT_PSBT_IN_WITNESS_SCRIPT_05: break;
-            case FKT_PSBT_IN_BIP32_DERIVATION: break;
-            case FKT_PSBT_IN_TAP_BIP32_DERIVATION: fkt_validate_tap_bip32_derivation(v,vl); break;
+            case FKT_PSBT_IN_WITNESS_SCRIPT_05:
+                if (vl <= sizeof(psbt_data.input_redeem_witness_script[i])) {
+                    memcpy(psbt_data.input_redeem_witness_script[i], v, vl);
+                    psbt_data.input_redeem_witness_script_len[i] = vl;
+                    psbt_data.input_has_redeem_witness_script[i] = 1;
+                }
+                break;
+            case FKT_PSBT_IN_BIP32_DERIVATION:
+                fkt_parse_bip32_derivation(i, kd, kdl, v, vl);
+                break;
+            case FKT_PSBT_IN_TAP_BIP32_DERIVATION:
+                fkt_parse_tap_bip32_derivation(i, v, vl);
+                break;
             case FKT_PSBT_IN_TAP_INTERNAL_KEY:
                 if(vl!=32) fkt_psbt_die("TAP_INTERNAL_KEY must be 32 bytes.");
+                memcpy(psbt_data.input_tap_int_key[i], v, 32);
                 psbt_data.input_has_tap_int_key[i]=1; break;
             case FKT_PSBT_IN_TAP_MERKLE_ROOT:
                 if(vl!=32) fkt_psbt_die("TAP_MERKLE_ROOT must be 32 bytes.");
@@ -573,7 +649,16 @@ static void parse_inputs(int expected_inputs) {
 static void parse_outputs(int expected_outputs) {
     int i; uint8_t kt; const uint8_t *kd,*v; size_t kdl,vl;
     for(i=0;i<expected_outputs;i++) {
-        while(1) { if(!parse_map_entry(&kt,&kd,&kdl,&v,&vl)) break; check_key_allowed(kt,MAP_OUTPUT); }
+        output_map_start_offsets[i] = (size_t)(psbt_cursor - psbt_buffer);
+        while(1) {
+            if(!parse_map_entry(&kt,&kd,&kdl,&v,&vl)) {
+                if (output_separator_count < MAX_PSBT_ITEMS)
+                    output_separator_offsets[output_separator_count++] =
+                        (size_t)(psbt_cursor - 1 - psbt_buffer);
+                break;
+            }
+            check_key_allowed(kt,MAP_OUTPUT);
+        }
     }
 }
 
@@ -680,4 +765,50 @@ void fkt_psbt_preview(void) {
     printf("\nFee: %lld sat",(long long)fee);
     if(fee<0) printf("  *** WARNING: negative fee ***");
     printf("\n");
+}
+
+int fkt_psbt_input_has_derivation(int input_index) {
+    if (input_index < 0 || input_index >= psbt_data.num_inputs) return 0;
+    return psbt_data.input_has_deriv_path[input_index];
+}
+
+int fkt_psbt_input_derivation_depth(int input_index) {
+    if (input_index < 0 || input_index >= psbt_data.num_inputs) return 0;
+    return psbt_data.input_deriv_depth[input_index];
+}
+
+const uint32_t *fkt_psbt_input_derivation_path(int input_index) {
+    if (input_index < 0 || input_index >= psbt_data.num_inputs) return NULL;
+    if (!psbt_data.input_has_deriv_path[input_index]) return NULL;
+    return psbt_data.input_deriv_path[input_index];
+}
+
+const uint8_t *fkt_psbt_input_derivation_parent_pub(int input_index) {
+    if (input_index < 0 || input_index >= psbt_data.num_inputs) return NULL;
+    if (!psbt_data.input_has_deriv_parent_pub[input_index]) return NULL;
+    return psbt_data.input_deriv_parent_pub[input_index];
+}
+
+int fkt_psbt_format_derivation_path(int input_index, char *buf, size_t buf_len) {
+    int depth, j, written, total;
+    uint32_t idx;
+
+    if (!buf || buf_len == 0) return -1;
+    if (!fkt_psbt_input_has_derivation(input_index)) return -1;
+
+    depth = fkt_psbt_input_derivation_depth(input_index);
+    written = snprintf(buf, buf_len, "m");
+    if (written < 0 || (size_t)written >= buf_len) return -1;
+    total = written;
+
+    for (j = 0; j < depth; j++) {
+        idx = psbt_data.input_deriv_path[input_index][j];
+        written = snprintf(buf + total, buf_len - (size_t)total,
+                           "/%u%s",
+                           (unsigned)(idx & 0x7FFFFFFFu),
+                           (idx & 0x80000000u) ? "'" : "");
+        if (written < 0 || (size_t)(total + written) >= buf_len) return -1;
+        total += written;
+    }
+    return 0;
 }

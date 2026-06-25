@@ -31,14 +31,18 @@
 #define FKT_PSBT_IN_FINAL_SCRIPTSIG       0x07
 #define FKT_PSBT_IN_FINAL_SCRIPTWITNESS   0x08
 #define FKT_PSBT_IN_TAP_BIP32_DERIVATION  0x16
-#define FKT_PSBT_IN_TAP_INTERNAL_KEY      0x18
-#define FKT_PSBT_IN_TAP_MERKLE_ROOT       0x19
+#define FKT_PSBT_IN_TAP_INTERNAL_KEY      0x17
+#define FKT_PSBT_IN_TAP_MERKLE_ROOT       0x18
 #define FKT_PSBT_IN_PROPRIETARY           0xFC
 
 /* output map key types */
 #define FKT_PSBT_OUT_WITNESS_SCRIPT       0x00
 #define FKT_PSBT_OUT_REDEEM_SCRIPT        0x01
 #define FKT_PSBT_OUT_BIP32_DERIVATION     0x02
+#define FKT_PSBT_OUT_TAP_INTERNAL_KEY     0x05
+#define FKT_PSBT_OUT_TAP_TREE             0x06
+#define FKT_PSBT_OUT_TAP_BIP32_DERIVATION 0x07
+#define FKT_PSBT_OUT_PROPRIETARY          0xFC
 
 /* sighash types */
 #define FKT_SIGHASH_DEFAULT     0x00
@@ -76,9 +80,19 @@ typedef struct {
     uint32_t input_sighash     [MAX_PSBT_ITEMS];
     int      input_has_sighash [MAX_PSBT_ITEMS];
     int      input_has_tap_int_key [MAX_PSBT_ITEMS];
+    uint8_t  input_tap_int_key     [MAX_PSBT_ITEMS][32];
     uint8_t  input_witness_script     [MAX_PSBT_ITEMS][520];
     size_t   input_witness_script_len [MAX_PSBT_ITEMS];
     int      input_has_witness_script [MAX_PSBT_ITEMS];
+    uint8_t  input_redeem_witness_script     [MAX_PSBT_ITEMS][520];
+    size_t   input_redeem_witness_script_len [MAX_PSBT_ITEMS];
+    int      input_has_redeem_witness_script [MAX_PSBT_ITEMS];
+
+    uint32_t input_deriv_path         [MAX_PSBT_ITEMS][10];
+    int      input_deriv_depth        [MAX_PSBT_ITEMS];
+    int      input_has_deriv_path     [MAX_PSBT_ITEMS];
+    uint8_t  input_deriv_parent_pub   [MAX_PSBT_ITEMS][33];
+    int      input_has_deriv_parent_pub [MAX_PSBT_ITEMS];
 
     int64_t  output_amount      [MAX_PSBT_ITEMS];
     uint8_t  output_script      [MAX_PSBT_ITEMS][520];
@@ -96,7 +110,11 @@ extern uint8_t hashPrevouts[32];
 extern uint8_t hashSequence[32];
 extern uint8_t hashOutputs[32];
 extern size_t input_separator_offsets[MAX_PSBT_ITEMS];
+extern size_t input_map_start_offsets[MAX_PSBT_ITEMS];
 extern int    input_separator_count;
+extern size_t output_separator_offsets[MAX_PSBT_ITEMS];
+extern size_t output_map_start_offsets[MAX_PSBT_ITEMS];
+extern int    output_separator_count;
 extern uint8_t sha_prevouts[32];
 extern uint8_t sha_amounts[32];
 extern uint8_t sha_scriptpubkeys[32];
@@ -114,5 +132,11 @@ void fkt_psbt_parse(void);
 void fkt_psbt_preview(void);
 
 const uint8_t* fkt_get_witness_script(int input_index, size_t *out_len);
+
+int  fkt_psbt_input_has_derivation(int input_index);
+int  fkt_psbt_input_derivation_depth(int input_index);
+const uint32_t *fkt_psbt_input_derivation_path(int input_index);
+const uint8_t *fkt_psbt_input_derivation_parent_pub(int input_index);
+int  fkt_psbt_format_derivation_path(int input_index, char *buf, size_t buf_len);
 
 #endif
