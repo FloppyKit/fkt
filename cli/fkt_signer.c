@@ -9,38 +9,85 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+/* Uncomment to enable signer debug prints */
+/* #define DEBUG_SIGNER 1 */
 
-/* #### SECTION: Insert key/value into PSBT (unchanged) #### */
+#ifdef DEBUG_SIGNER
+static void fkt_debug_hex(const char *label, const uint8_t *buf, size_t len) {
+    size_t i;
+    printf("[DEBUG_SIGNER] %s:", label);
+    for (i = 0; i < len; i++) printf("%02x", buf[i]);
+    printf("\n");
+}
+
+static void fkt_debug_master_fp(const uint8_t seed[64]) {
+    uint8_t master_priv[32], master_chain[32], master_pub[33];
+    uint8_t hash20[20];
+    secp256k1_context *ctx = fkt_secp256k1_ctx();
+    secp256k1_pubkey pubkey;
+    size_t pub_len = 33;
+
+    fkt_bip32_master(seed, master_priv, master_chain);
+    if (secp256k1_ec_pubkey_create(ctx, &pubkey, master_priv)) {
+        secp256k1_ec_pubkey_serialize(ctx, master_pub, &pub_len, &pubkey,
+                                      SECP256K1_EC_COMPRESSED);
+        fkt_hash160(master_pub, 33, hash20);
+        fkt_debug_hex("master fingerprint", hash20, 4);
+    }
+    fkt_zerobytes(master_priv, 32);
+    fkt_zerobytes(master_chain, 32);
+}
+#else
+#define fkt_debug_hex(label, buf, len) ((void)0)
+#define fkt_debug_master_fp(seed) ((void)0)
+#endif
+
+static void fkt_shift_output_offsets(size_t from, long delta) {
+    int j;
+    if (delta == 0) return;
+    for (j = 0; j < output_separator_count; j++) {
+        if (output_map_start_offsets[j] >= from) {
+            output_map_start_offsets[j] = (size_t)((long)output_map_start_offsets[j] + delta);
+            output_separator_offsets[j] = (size_t)((long)output_separator_offsets[j] + delta);
+        }
+    }
+}
+
+static size_t fkt_write_compact_size(uint8_t *out, uint64_t val) {
+    if (val < 0xFD) {
+        out[0] = (uint8_t)val;
+        return 1;
+    }
+    if (val <= 0xFFFF) {
+        out[0] = 0xFD;
+        out[1] = (uint8_t)(val & 0xFF);
+        out[2] = (uint8_t)((val >> 8) & 0xFF);
+        return 3;
+    }
+    return 0;
+}
+
 static int fkt_insert_input_key(int input_index, uint8_t key_type,
+                                const uint8_t *key_extra, size_t key_extra_len,
                                 const uint8_t *value, size_t value_len) {
     size_t sep_off, total_shift, old_size, new_size;
     uint8_t key_len_vi[9], val_len_vi[9];
     size_t key_len_vi_size, val_len_vi_size;
-    size_t entry_size;
+    size_t key_body_len, entry_size;
     uint8_t *buf = psbt_buffer;
+    int j;
 
     if (input_index < 0 || input_index >= input_separator_count) return -1;
     sep_off = input_separator_offsets[input_index];
 
-    key_len_vi[0] = 1; key_len_vi_size = 1;
-    {
-        uint64_t vlen = value_len;
-        if (vlen < 0xFD) {
-            val_len_vi[0] = (uint8_t)vlen; val_len_vi_size = 1;
-        } else if (vlen <= 0xFFFF) {
-            val_len_vi[0] = 0xFD;
-            val_len_vi[1] = (uint8_t)(vlen & 0xFF);
-            val_len_vi[2] = (uint8_t)((vlen >> 8) & 0xFF);
-            val_len_vi_size = 3;
-        } else {
-            return -1;
-        }
-    }
+    key_body_len = 1 + key_extra_len;
+    key_len_vi_size = fkt_write_compact_size(key_len_vi, (uint64_t)key_body_len);
+    if (key_len_vi_size == 0) return -1;
 
+    val_len_vi_size = fkt_write_compact_size(val_len_vi, (uint64_t)value_len);
+    if (val_len_vi_size == 0) return -1;
 
-   
-
-    entry_size = key_len_vi_size + 1 + val_len_vi_size + value_len;
+    entry_size = key_len_vi_size + key_body_len + val_len_vi_size + value_len;
     total_shift = entry_size;
     old_size = psbt_size;
     new_size = old_size + total_shift;
@@ -56,126 +103,435 @@ static int fkt_insert_input_key(int input_index, uint8_t key_type,
         uint8_t *p = buf + sep_off;
         memcpy(p, key_len_vi, key_len_vi_size); p += key_len_vi_size;
         *p++ = key_type;
+        if (key_extra_len > 0) {
+            memcpy(p, key_extra, key_extra_len);
+            p += key_extra_len;
+        }
         memcpy(p, val_len_vi, val_len_vi_size); p += val_len_vi_size;
         memcpy(p, value, value_len);
     }
 
     psbt_size = new_size;
+    input_separator_offsets[input_index] += total_shift;
+    for (j = input_index + 1; j < input_separator_count; j++) {
+        input_separator_offsets[j] += total_shift;
+        input_map_start_offsets[j] += total_shift;
+    }
+    fkt_shift_output_offsets(sep_off, (long)total_shift);
     return 0;
 }
 
-/* #### SECTION: Full P2WPKH signing (uses crypto module for derivation, hashing, zeroing) #### */
-int fkt_sign_psbt(const uint8_t seed[64], const char *path_str,
-                  const char *psbt_file, const char *output_file) {
+static int fkt_read_varint_at(const uint8_t *buf, size_t buf_len, size_t pos,
+                              uint64_t *val_out, size_t *next_pos) {
+    uint8_t first;
+    if (pos >= buf_len) return -1;
+    first = buf[pos];
+    if (first < 0xFD) {
+        *val_out = first;
+        *next_pos = pos + 1;
+        return 0;
+    }
+    if (first == 0xFD) {
+        if (pos + 3 > buf_len) return -1;
+        *val_out = (uint64_t)buf[pos + 1] | ((uint64_t)buf[pos + 2] << 8);
+        *next_pos = pos + 3;
+        return 0;
+    }
+    if (first == 0xFE) {
+        if (pos + 5 > buf_len) return -1;
+        *val_out = (uint64_t)buf[pos + 1] | ((uint64_t)buf[pos + 2] << 8) |
+                   ((uint64_t)buf[pos + 3] << 16) | ((uint64_t)buf[pos + 4] << 24);
+        *next_pos = pos + 5;
+        return 0;
+    }
+    if (pos + 9 > buf_len) return -1;
+    *val_out = (uint64_t)buf[pos + 1] | ((uint64_t)buf[pos + 2] << 8) |
+               ((uint64_t)buf[pos + 3] << 16) | ((uint64_t)buf[pos + 4] << 24) |
+               ((uint64_t)buf[pos + 5] << 32) | ((uint64_t)buf[pos + 6] << 40) |
+               ((uint64_t)buf[pos + 7] << 48) | ((uint64_t)buf[pos + 8] << 56);
+    *next_pos = pos + 9;
+    return 0;
+}
+
+static int fkt_remove_output_key_type(int output_index, uint8_t key_type) {
+    size_t start, end, pos, remove_off, remove_len;
+    uint64_t key_len, val_len;
+    size_t next_pos;
+    int j;
+
+    if (output_index < 0 || output_index >= output_separator_count) return -1;
+    start = output_map_start_offsets[output_index];
+    end = output_separator_offsets[output_index];
+    pos = start;
+    remove_off = 0;
+    remove_len = 0;
+
+    while (pos < end) {
+        size_t entry_start = pos;
+        if (fkt_read_varint_at(psbt_buffer, psbt_size, pos, &key_len, &next_pos) != 0)
+            return -1;
+        pos = next_pos;
+        if (pos + key_len > end) return -1;
+        if (key_len >= 1 && psbt_buffer[pos] == key_type) {
+            remove_off = entry_start;
+            pos += (size_t)key_len;
+            if (fkt_read_varint_at(psbt_buffer, psbt_size, pos, &val_len, &next_pos) != 0)
+                return -1;
+            pos = next_pos + (size_t)val_len;
+            remove_len = pos - remove_off;
+            break;
+        }
+        pos += (size_t)key_len;
+        if (fkt_read_varint_at(psbt_buffer, psbt_size, pos, &val_len, &next_pos) != 0)
+            return -1;
+        pos = next_pos + (size_t)val_len;
+    }
+
+    if (remove_len == 0) return 0;
+
+    memmove(psbt_buffer + remove_off, psbt_buffer + remove_off + remove_len,
+            psbt_size - (remove_off + remove_len));
+    psbt_size -= remove_len;
+    output_separator_offsets[output_index] -= remove_len;
+    for (j = output_index + 1; j < output_separator_count; j++) {
+        output_separator_offsets[j] -= remove_len;
+        output_map_start_offsets[j] -= remove_len;
+    }
+    return 0;
+}
+
+static void fkt_cleanup_signed_psbt_maps(void) {
     int i;
-    uint8_t child_priv[32], child_pub33[33];
-    uint8_t hash20[20];
+
+    for (i = 0; i < psbt_data.num_outputs; i++) {
+        fkt_remove_output_key_type(i, FKT_PSBT_OUT_BIP32_DERIVATION);
+        fkt_remove_output_key_type(i, FKT_PSBT_OUT_TAP_TREE);
+        fkt_remove_output_key_type(i, FKT_PSBT_OUT_TAP_BIP32_DERIVATION);
+        fkt_remove_output_key_type(i, FKT_PSBT_OUT_PROPRIETARY);
+    }
+}
+
+static int fkt_ecdsa_sign_der_normalized(secp256k1_context *ctx,
+                                           const uint8_t sighash[32],
+                                           const uint8_t privkey[32],
+                                           uint8_t der_sig[74],
+                                           size_t *sig_len_out) {
+    secp256k1_ecdsa_signature sig, norm;
+
+    if (!secp256k1_ecdsa_sign(ctx, &sig, sighash, privkey, NULL, NULL))
+        return -1;
+    secp256k1_ecdsa_signature_normalize(ctx, &norm, &sig);
+    *sig_len_out = 74;
+    if (!secp256k1_ecdsa_signature_serialize_der(ctx, der_sig, sig_len_out, &norm))
+        return -1;
+    return 0;
+}
+
+static int fkt_remove_input_key_type(int input_index, uint8_t key_type) {
+    size_t start, end, pos, remove_off, remove_len;
+    uint64_t key_len, val_len;
+    size_t next_pos;
+    int j;
+
+    if (input_index < 0 || input_index >= input_separator_count) return -1;
+    start = input_map_start_offsets[input_index];
+    end = input_separator_offsets[input_index];
+    pos = start;
+    remove_off = 0;
+    remove_len = 0;
+
+    while (pos < end) {
+        size_t entry_start = pos;
+        if (fkt_read_varint_at(psbt_buffer, psbt_size, pos, &key_len, &next_pos) != 0)
+            return -1;
+        pos = next_pos;
+        if (pos + key_len > end) return -1;
+        if (key_len >= 1 && psbt_buffer[pos] == key_type) {
+            remove_off = entry_start;
+            pos += (size_t)key_len;
+            if (fkt_read_varint_at(psbt_buffer, psbt_size, pos, &val_len, &next_pos) != 0)
+                return -1;
+            pos = next_pos + (size_t)val_len;
+            remove_len = pos - remove_off;
+            break;
+        }
+        pos += (size_t)key_len;
+        if (fkt_read_varint_at(psbt_buffer, psbt_size, pos, &val_len, &next_pos) != 0)
+            return -1;
+        pos = next_pos + (size_t)val_len;
+    }
+
+    if (remove_len == 0) return 0;
+
+    memmove(psbt_buffer + remove_off, psbt_buffer + remove_off + remove_len,
+            psbt_size - (remove_off + remove_len));
+    psbt_size -= remove_len;
+    input_separator_offsets[input_index] -= remove_len;
+    for (j = input_index + 1; j < input_separator_count; j++) {
+        input_separator_offsets[j] -= remove_len;
+        input_map_start_offsets[j] -= remove_len;
+    }
+    fkt_shift_output_offsets(remove_off, -(long)remove_len);
+    return 0;
+}
+
+static int fkt_witness_script_has_pubkey(const uint8_t *witness_script,
+                                         size_t witness_script_len,
+                                         const uint8_t pub33[33]) {
+    size_t pos = 0;
+    if (witness_script_len < 4) return 0;
+    pos = 1; /* skip OP_m */
+    while (pos < witness_script_len) {
+        uint8_t op = witness_script[pos];
+        if (op == 0xAE) break; /* OP_CHECKMULTISIG */
+        if (op >= 0x51 && op <= 0x60) break; /* OP_n threshold */
+        if (op != 0x21 && op != 0x20) return 0;
+        if (pos + 1 + op > witness_script_len) return 0;
+        if (op == 0x21 && memcmp(witness_script + pos + 1, pub33, 33) == 0)
+            return 1;
+        pos += 1 + op;
+    }
+    return 0;
+}
+
+static int fkt_input_has_partial_sig(int input_index, const uint8_t pub33[33]) {
+    size_t start, end, pos;
+    uint64_t key_len, val_len;
+    size_t next_pos;
+
+    if (input_index < 0 || input_index >= input_separator_count) return 0;
+    start = input_map_start_offsets[input_index];
+    end = input_separator_offsets[input_index];
+    pos = start;
+    while (pos < end) {
+        if (fkt_read_varint_at(psbt_buffer, psbt_size, pos, &key_len, &next_pos) != 0)
+            return 0;
+        pos = next_pos;
+        if (pos + key_len > end) return 0;
+        if (key_len == 34 && psbt_buffer[pos] == FKT_PSBT_IN_PARTIAL_SIG &&
+            memcmp(psbt_buffer + pos + 1, pub33, 33) == 0)
+            return 1;
+        pos += (size_t)key_len;
+        if (fkt_read_varint_at(psbt_buffer, psbt_size, pos, &val_len, &next_pos) != 0)
+            return 0;
+        pos = next_pos + (size_t)val_len;
+    }
+    return 0;
+}
+
+static int fkt_insert_partial_sig(int input_index,
+                                  const uint8_t pub33[33],
+                                  const uint8_t der_sig[74], size_t sig_len) {
+    if (fkt_input_has_partial_sig(input_index, pub33))
+        return 0;
+    return fkt_insert_input_key(input_index, FKT_PSBT_IN_PARTIAL_SIG,
+                                pub33, 33, der_sig, sig_len);
+}
+
+static int fkt_insert_finalized_p2wpkh(int input_index,
+                                       const uint8_t der_sig[74], size_t sig_len,
+                                       const uint8_t pub33[33]) {
+    uint8_t witness[120];
+    uint8_t *wp = witness;
+    size_t wlen;
+
+    if (fkt_insert_input_key(input_index, 0x07, NULL, 0, NULL, 0) != 0)
+        return -1;
+
+    *wp++ = 0x02;
+    wp += fkt_write_compact_size(wp, (uint64_t)sig_len);
+    memcpy(wp, der_sig, sig_len); wp += sig_len;
+    wp += fkt_write_compact_size(wp, 33);
+    memcpy(wp, pub33, 33); wp += 33;
+    wlen = (size_t)(wp - witness);
+
+    if (fkt_insert_input_key(input_index, 0x08, NULL, 0, witness, wlen) != 0)
+        return -1;
+    return 0;
+}
+
+static int fkt_derive_input_keys(const uint8_t seed[64],
+                                 int input_index,
+                                 const char *path_override,
+                                 const uint8_t *parent_pub_override,
+                                 uint8_t child_priv[32],
+                                 uint8_t child_pub33[33]) {
+    if (fkt_psbt_input_has_derivation(input_index)) {
+        return fkt_derive_from_indices(seed,
+                                       fkt_psbt_input_derivation_path(input_index),
+                                       fkt_psbt_input_derivation_depth(input_index),
+                                       child_priv, child_pub33,
+                                       parent_pub_override);
+    }
+
+    if (path_override != NULL && path_override[0] != '\0') {
+        return fkt_derive_from_path(seed, path_override,
+                                    child_priv, child_pub33,
+                                    parent_pub_override);
+    }
+
+    printf("No derivation path for input %d.\n", input_index);
+    return -1;
+}
+
+static int fkt_sign_loaded_psbt(const uint8_t seed[64],
+                                const char *path_override,
+                                const uint8_t *parent_pub_override,
+                                const char *output_file) {
+    int i;
     FILE *fout = NULL;
     int ok = -1;
     int signed_any = 0;
     secp256k1_context *ctx = fkt_secp256k1_ctx();
 
-    /* 1. Parse PSBT */
-    fkt_psbt_init();
-    if (fkt_psbt_load_file(psbt_file) != 0) { printf("Failed to load PSBT.\n"); goto cleanup; }
-    fkt_psbt_parse();
-    fkt_compute_hash_caches();
+    fkt_debug_master_fp(seed);
 
-    /* 2. Derive keys using the unified derivation function */
-    if (fkt_derive_from_path(seed, path_str, child_priv, child_pub33, NULL) != 0) {
-        printf("Key derivation failed.\n");
-        goto cleanup;
-    }
-
-    /* 3. HASH160 of child public key */
-    fkt_hash160(child_pub33, 33, hash20);
-
-    /* 4. Process each input */
     for (i = 0; i < psbt_data.num_inputs; i++) {
-          /* ---- Taproot (P2TR) key-path signing ---- */
-        if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2TR) {
+        uint8_t child_priv[32], child_pub33[33];
+        uint8_t hash20[20];
 
+        if (fkt_derive_input_keys(seed, i, path_override, parent_pub_override,
+                                  child_priv, child_pub33) != 0) {
+            goto cleanup;
+        }
+        fkt_debug_hex("derived child privkey", child_priv, 32);
+        fkt_hash160(child_pub33, 33, hash20);
+
+        if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2TR) {
             uint8_t sighash[32];
+            uint8_t sig[64];
+            int sig_len;
+            uint8_t witness[66];
+
+            uint8_t tap_int_key[32];
+            int has_tap_int_key = psbt_data.input_has_tap_int_key[i];
+
+            fkt_remove_input_key_type(i, 0x03);
+            fkt_remove_input_key_type(i, 0x16);
+            if (has_tap_int_key) {
+                memcpy(tap_int_key, psbt_data.input_tap_int_key[i], 32);
+                fkt_remove_input_key_type(i, FKT_PSBT_IN_TAP_INTERNAL_KEY);
+            }
+
             if (fkt_bip341_sighash(i, sighash) != 0) {
                 printf("Sighash error for input %d (Taproot)\n", i);
                 goto cleanup;
             }
-            uint8_t sig[64];
-            int sig_len;
-            if (fkt_schnorr_sign(child_priv, sighash, sig, &sig_len) != 0) {
+            fkt_debug_hex("sighash", sighash, 32);
+
+            if (fkt_schnorr_sign_taproot(child_priv, sighash, NULL, 0, sig, &sig_len) != 0) {
                 printf("Schnorr signing failed for input %d\n", i);
                 goto cleanup;
             }
-            if (fkt_insert_input_key(i, 0x13, sig, sig_len) != 0) {
-                printf("PSBT buffer overflow inserting Schnorr signature for input %d\n", i);
+            fkt_debug_hex("schnorr sig", sig, 64);
+
+            if (fkt_insert_input_key(i, 0x07, NULL, 0, NULL, 0) != 0) {
+                printf("PSBT buffer overflow inserting scriptsig for input %d\n", i);
                 goto cleanup;
             }
-            /* Finalize the Taproot input: add empty scriptsig (0x07)
-               and the witness stack (0x08) */
-            {
-                uint8_t empty[1] = { 0x00 };
-
-                if (fkt_insert_input_key(i, 0x07, empty, 0) != 0) {
-                    printf("PSBT buffer overflow inserting scriptsig for input %d\n", i);
-                    goto cleanup;
-                }
-
-                /* Build witness stack: 1 item (the 64‑byte signature) */
-                uint8_t witness[66];
-                witness[0] = 0x01;
-                witness[1] = 64;
-                memcpy(witness + 2, sig, 64);
-
-                if (fkt_insert_input_key(i, 0x08, witness, 66) != 0) {
-                    printf("PSBT buffer overflow inserting witness stack for input %d\n", i);
+            witness[0] = 0x01;
+            witness[1] = 64;
+            memcpy(witness + 2, sig, 64);
+            if (fkt_insert_input_key(i, 0x08, NULL, 0, witness, 66) != 0) {
+                printf("PSBT buffer overflow inserting witness stack for input %d\n", i);
+                goto cleanup;
+            }
+            if (has_tap_int_key) {
+                if (fkt_insert_input_key(i, FKT_PSBT_IN_TAP_INTERNAL_KEY, NULL, 0, tap_int_key, 32) != 0) {
+                    printf("PSBT buffer overflow inserting tap internal key for input %d\n", i);
                     goto cleanup;
                 }
             }
-
             signed_any = 1;
+            fkt_zerobytes(child_priv, 32);
             continue;
         }
-        /* ---- P2SH‑P2WPKH signing ---- */
+
+        if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2WSH) {
+            const uint8_t *ws;
+            size_t ws_len;
+
+            if (!psbt_data.input_has_redeem_witness_script[i]) continue;
+            ws = psbt_data.input_redeem_witness_script[i];
+            ws_len = psbt_data.input_redeem_witness_script_len[i];
+            if (!fkt_witness_script_has_pubkey(ws, ws_len, child_pub33)) continue;
+
+            {
+                uint8_t sighash[32];
+                uint8_t der_sig[74];
+                size_t sig_len = sizeof(der_sig);
+
+                if (fkt_bip143_sighash_p2wsh(i, ws, ws_len, sighash) != 0) {
+                    printf("Sighash error for input %d (P2WSH)\n", i);
+                    goto cleanup;
+                }
+                fkt_debug_hex("sighash", sighash, 32);
+                if (fkt_ecdsa_sign_der_normalized(ctx, sighash, child_priv, der_sig, &sig_len) != 0) {
+                    printf("Signing failed for input %d (P2WSH)\n", i);
+                    goto cleanup;
+                }
+                if (sig_len + 1 > sizeof(der_sig)) {
+                    printf("DER signature too long for input %d\n", i);
+                    goto cleanup;
+                }
+                der_sig[sig_len++] = 0x01;
+                fkt_debug_hex("DER sig", der_sig, sig_len);
+                if (fkt_insert_partial_sig(i, child_pub33, der_sig, sig_len) != 0) {
+                    printf("PSBT buffer overflow inserting partial sig for input %d\n", i);
+                    goto cleanup;
+                }
+            }
+            signed_any = 1;
+            fkt_zerobytes(child_priv, 32);
+            continue;
+        }
+
         if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2SH_P2WPKH) {
             if (!psbt_data.input_has_redeem_script[i]) {
-                printf("P2SH‑P2WPKH input %d missing redeem script\n", i);
+                printf("P2SH-P2WPKH input %d missing redeem script\n", i);
                 goto cleanup;
             }
-            uint8_t sighash[32];
-            if (fkt_bip143_sighash_p2sh_p2wpkh(i, psbt_data.input_redeem_script[i], sighash) != 0) {
-                printf("Sighash error for input %d (P2SH‑P2WPKH)\n", i);
-                goto cleanup;
+            if (psbt_data.input_redeem_script_len[i] != 22 ||
+                psbt_data.input_redeem_script[i][0] != 0x00 ||
+                psbt_data.input_redeem_script[i][1] != 0x14 ||
+                memcmp(hash20, psbt_data.input_redeem_script[i] + 2, 20) != 0) {
+                continue;
             }
-            secp256k1_ecdsa_signature sig;
-            if (!secp256k1_ecdsa_sign(ctx, &sig, sighash, child_priv, NULL, NULL)) {
-                printf("Signing failed for input %d (P2SH‑P2WPKH)\n", i);
-                goto cleanup;
-            }
-            uint8_t der_sig[74];
-            size_t sig_len = sizeof(der_sig);
-            if (!secp256k1_ecdsa_signature_serialize_der(ctx, der_sig, &sig_len, &sig)) {
-                printf("DER serialisation failed for input %d\n", i);
-                goto cleanup;
-            }
-            if (fkt_insert_input_key(i, 0x02, der_sig, sig_len) != 0) {
-                printf("PSBT buffer overflow inserting signature for input %d\n", i);
-                goto cleanup;
+            {
+                uint8_t sighash[32];
+                uint8_t der_sig[74];
+                size_t sig_len = sizeof(der_sig);
+
+                if (fkt_bip143_sighash_p2sh_p2wpkh(i, psbt_data.input_redeem_script[i], sighash) != 0) {
+                    printf("Sighash error for input %d (P2SH-P2WPKH)\n", i);
+                    goto cleanup;
+                }
+                fkt_debug_hex("sighash", sighash, 32);
+                if (fkt_ecdsa_sign_der_normalized(ctx, sighash, child_priv, der_sig, &sig_len) != 0) {
+                    printf("Signing failed for input %d (P2SH-P2WPKH)\n", i);
+                    goto cleanup;
+                }
+                if (sig_len + 1 > sizeof(der_sig)) {
+                    printf("DER signature too long for input %d\n", i);
+                    goto cleanup;
+                }
+                der_sig[sig_len++] = 0x01;
+                fkt_debug_hex("DER sig", der_sig, sig_len);
+                if (fkt_insert_partial_sig(i, child_pub33, der_sig, sig_len) != 0) {
+                    printf("PSBT buffer overflow inserting partial sig for input %d\n", i);
+                    goto cleanup;
+                }
             }
             signed_any = 1;
+            fkt_zerobytes(child_priv, 32);
             continue;
         }
 
-        /* ---- P2WPKH signing ---- */
         if (psbt_data.input_script_type[i] != SCRIPT_TYPE_P2WPKH) continue;
         if (!psbt_data.input_has_witness_script[i]) continue;
 
-        { int k;
-        printf("DEBUG: derived hash20 = ");
-        for (k = 0; k < 20; k++) printf("%02x", hash20[k]);
-        printf("\nDEBUG: PSBT witness hash = ");
-        for (k = 0; k < 20; k++) printf("%02x", psbt_data.input_witness_script[i][2+k]);
-        printf("\n");
-        }
+        fkt_remove_input_key_type(i, 0x03);
+        fkt_remove_input_key_type(i, 0x02);
 
         if (memcmp(hash20, psbt_data.input_witness_script[i] + 2, 20) != 0) {
             printf("Public key mismatch for input %d\n", i);
@@ -184,27 +540,31 @@ int fkt_sign_psbt(const uint8_t seed[64], const char *path_str,
 
         {
             uint8_t sighash[32];
+            uint8_t der_sig[74];
+            size_t sig_len = sizeof(der_sig);
+
             if (fkt_bip143_sighash(i, psbt_data.input_witness_script[i], sighash) != 0) {
                 printf("Sighash error for input %d\n", i);
                 goto cleanup;
             }
-            secp256k1_ecdsa_signature sig;
-            if (!secp256k1_ecdsa_sign(ctx, &sig, sighash, child_priv, NULL, NULL)) {
+            fkt_debug_hex("sighash", sighash, 32);
+            if (fkt_ecdsa_sign_der_normalized(ctx, sighash, child_priv, der_sig, &sig_len) != 0) {
                 printf("Signing failed for input %d\n", i);
                 goto cleanup;
             }
-            uint8_t der_sig[74];
-            size_t sig_len = sizeof(der_sig);
-            if (!secp256k1_ecdsa_signature_serialize_der(ctx, der_sig, &sig_len, &sig)) {
-                printf("DER serialisation failed for input %d\n", i);
+            if (sig_len + 1 > sizeof(der_sig)) {
+                printf("DER signature too long for input %d\n", i);
                 goto cleanup;
             }
-            if (fkt_insert_input_key(i, 0x02, der_sig, sig_len) != 0) {
-                printf("PSBT buffer overflow inserting signature for input %d\n", i);
+            der_sig[sig_len++] = 0x01;
+            fkt_debug_hex("DER sig", der_sig, sig_len);
+            if (fkt_insert_finalized_p2wpkh(i, der_sig, sig_len, child_pub33) != 0) {
+                printf("PSBT buffer overflow finalizing input %d\n", i);
                 goto cleanup;
             }
             signed_any = 1;
         }
+        fkt_zerobytes(child_priv, 32);
     }
 
     if (!signed_any) {
@@ -212,7 +572,8 @@ int fkt_sign_psbt(const uint8_t seed[64], const char *path_str,
         goto cleanup;
     }
 
-    /* 5. Write signed PSBT */
+    fkt_cleanup_signed_psbt_maps();
+
     fout = fopen(output_file, "wb");
     if (!fout) { printf("Cannot open output file.\n"); goto cleanup; }
     fwrite(psbt_buffer, 1, psbt_size, fout);
@@ -221,10 +582,18 @@ int fkt_sign_psbt(const uint8_t seed[64], const char *path_str,
     ok = 0;
 
 cleanup:
-    fkt_zerobytes(child_priv, 32);
-    fkt_zerobytes(hash20, 20);
     if (fout) fclose(fout);
     return ok;
+}
+
+int fkt_sign_psbt(const uint8_t seed[64], const char *path_str,
+                  const char *psbt_file, const char *output_file) {
+    fkt_secp256k1_init();
+    fkt_psbt_init();
+    if (fkt_psbt_load_file(psbt_file) != 0) { printf("Failed to load PSBT.\n"); return -1; }
+    fkt_psbt_parse();
+    fkt_compute_hash_caches();
+    return fkt_sign_loaded_psbt(seed, path_str, NULL, output_file);
 }
 
 int fkt_sign_psbt_with_parent(const uint8_t seed[64],
@@ -232,165 +601,10 @@ int fkt_sign_psbt_with_parent(const uint8_t seed[64],
                               const char *psbt_file,
                               const char *output_file,
                               const uint8_t parent_pub33[33]) {
-                              int i;
-                              uint8_t hash20[20];
-                              FILE *fout = NULL;
-                              int ok = -1;
-                              int signed_any = 0;
-                              secp256k1_context *ctx = fkt_secp256k1_ctx();
-                              uint8_t child_priv[32], child_pub33[33];
-
-    /* 1. Parse PSBT */
+    fkt_secp256k1_init();
     fkt_psbt_init();
-    if (fkt_psbt_load_file(psbt_file) != 0) { printf("Failed to load PSBT.\n"); goto cleanup; }
+    if (fkt_psbt_load_file(psbt_file) != 0) { printf("Failed to load PSBT.\n"); return -1; }
     fkt_psbt_parse();
     fkt_compute_hash_caches();
-
-    /* 2. Derive keys using the unified derivation function */
-    if (fkt_derive_from_path(seed, path_str, child_priv, child_pub33, parent_pub33) != 0) {
-        printf("Key derivation failed.\n");
-        goto cleanup;
-    }
-
-    /* 3. HASH160 of child public key */
-    fkt_hash160(child_pub33, 33, hash20);
-
-    /* 4. Process each input */
-    for (i = 0; i < psbt_data.num_inputs; i++) {
-          /* ---- Taproot (P2TR) key-path signing ---- */
-        if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2TR) {
-
-            uint8_t sighash[32];
-            if (fkt_bip341_sighash(i, sighash) != 0) {
-                printf("Sighash error for input %d (Taproot)\n", i);
-                goto cleanup;
-            }
-            uint8_t sig[64];
-            int sig_len;
-            if (fkt_schnorr_sign(child_priv, sighash, sig, &sig_len) != 0) {
-                printf("Schnorr signing failed for input %d\n", i);
-                goto cleanup;
-            }
-            if (fkt_insert_input_key(i, 0x13, sig, sig_len) != 0) {
-                printf("PSBT buffer overflow inserting Schnorr signature for input %d\n", i);
-                goto cleanup;
-            }
-            /* Finalize the Taproot input: add empty scriptsig (0x07)
-               and the witness stack (0x08) */
-            {
-                uint8_t empty[1] = { 0x00 };
-
-                if (fkt_insert_input_key(i, 0x07, empty, 0) != 0) {
-                    printf("PSBT buffer overflow inserting scriptsig for input %d\n", i);
-                    goto cleanup;
-                }
-
-                /* Build witness stack: 1 item (the 64‑byte signature) */
-                uint8_t witness[66];
-                witness[0] = 0x01;
-                witness[1] = 64;
-                memcpy(witness + 2, sig, 64);
-
-                if (fkt_insert_input_key(i, 0x08, witness, 66) != 0) {
-                    printf("PSBT buffer overflow inserting witness stack for input %d\n", i);
-                    goto cleanup;
-                }
-            }
-
-            signed_any = 1;
-            continue;
-        }
-        /* ---- P2SH‑P2WPKH signing ---- */
-        if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2SH_P2WPKH) {
-            if (!psbt_data.input_has_redeem_script[i]) {
-                printf("P2SH‑P2WPKH input %d missing redeem script\n", i);
-                goto cleanup;
-            }
-            uint8_t sighash[32];
-            if (fkt_bip143_sighash_p2sh_p2wpkh(i, psbt_data.input_redeem_script[i], sighash) != 0) {
-                printf("Sighash error for input %d (P2SH‑P2WPKH)\n", i);
-                goto cleanup;
-            }
-            secp256k1_ecdsa_signature sig;
-            if (!secp256k1_ecdsa_sign(ctx, &sig, sighash, child_priv, NULL, NULL)) {
-                printf("Signing failed for input %d (P2SH‑P2WPKH)\n", i);
-                goto cleanup;
-            }
-            uint8_t der_sig[74];
-            size_t sig_len = sizeof(der_sig);
-            if (!secp256k1_ecdsa_signature_serialize_der(ctx, der_sig, &sig_len, &sig)) {
-                printf("DER serialisation failed for input %d\n", i);
-                goto cleanup;
-            }
-            if (fkt_insert_input_key(i, 0x02, der_sig, sig_len) != 0) {
-                printf("PSBT buffer overflow inserting signature for input %d\n", i);
-                goto cleanup;
-            }
-            signed_any = 1;
-            continue;
-        }
-
-        /* ---- P2WPKH signing ---- */
-        if (psbt_data.input_script_type[i] != SCRIPT_TYPE_P2WPKH) continue;
-        if (!psbt_data.input_has_witness_script[i]) continue;
-
-        { int k;
-        printf("DEBUG: derived hash20 = ");
-        for (k = 0; k < 20; k++) printf("%02x", hash20[k]);
-        printf("\nDEBUG: PSBT witness hash = ");
-        for (k = 0; k < 20; k++) printf("%02x", psbt_data.input_witness_script[i][2+k]);
-        printf("\n");
-        }
-
-        if (memcmp(hash20, psbt_data.input_witness_script[i] + 2, 20) != 0) {
-            printf("Public key mismatch for input %d\n", i);
-            goto cleanup;
-        }
-
-        {
-            uint8_t sighash[32];
-            if (fkt_bip143_sighash(i, psbt_data.input_witness_script[i], sighash) != 0) {
-                printf("Sighash error for input %d\n", i);
-                goto cleanup;
-            }
-            secp256k1_ecdsa_signature sig;
-            if (!secp256k1_ecdsa_sign(ctx, &sig, sighash, child_priv, NULL, NULL)) {
-                printf("Signing failed for input %d\n", i);
-                goto cleanup;
-            }
-            uint8_t der_sig[74];
-            size_t sig_len = sizeof(der_sig);
-            if (!secp256k1_ecdsa_signature_serialize_der(ctx, der_sig, &sig_len, &sig)) {
-                printf("DER serialisation failed for input %d\n", i);
-                goto cleanup;
-            }
-            if (fkt_insert_input_key(i, 0x02, der_sig, sig_len) != 0) {
-                printf("PSBT buffer overflow inserting signature for input %d\n", i);
-                goto cleanup;
-            }
-            signed_any = 1;
-        }
-    }
-
-    if (!signed_any) {
-        printf("No inputs could be signed.\n");
-        goto cleanup;
-    }
-
-    /* 5. Write signed PSBT */
-    fout = fopen(output_file, "wb");
-    if (!fout) { printf("Cannot open output file.\n"); goto cleanup; }
-    fwrite(psbt_buffer, 1, psbt_size, fout);
-    fclose(fout);
-    fout = NULL;
-    ok = 0;
-
-cleanup:
-    fkt_zerobytes(child_priv, 32);
-    fkt_zerobytes(hash20, 20);
-    if (fout) fclose(fout);
-    return ok;
+    return fkt_sign_loaded_psbt(seed, path_str, parent_pub33, output_file);
 }
-
-/* Sign a PSBT using a pre‑derived private key and compressed public key.
-   No BIP32 derivation is performed. */
