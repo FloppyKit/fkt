@@ -1,6 +1,7 @@
 #include "fkt_sighash.h"
 #include "fkt_psbt.h"          /* for psbt_data access */
 #include "fkt_sha256.h"
+#include "fkt_secp256k1.h"
 #include <string.h>
 
 /* External data from fkt_psbt.c */
@@ -22,7 +23,7 @@ void fkt_compute_hash_caches(void) {
         fkt_sha256_update(&ctx, (const uint8_t*)&psbt_data.input_vout[i], 4);
     }
     fkt_sha256_final(&ctx, tmp);
-    fkt_sha256d(tmp, 32, hashPrevouts);
+    fkt_sha256(tmp, 32, hashPrevouts);
 
     /* hashSequence = dSHA256(all nSequence LE) */
     fkt_sha256_init(&ctx);
@@ -35,7 +36,7 @@ void fkt_compute_hash_caches(void) {
         fkt_sha256_update(&ctx, seq, 4);
     }
     fkt_sha256_final(&ctx, tmp);
-    fkt_sha256d(tmp, 32, hashSequence);
+    fkt_sha256(tmp, 32, hashSequence);
 
     /* sha_outputs & hashOutputs */
     fkt_sha256_init(&ctx);
@@ -52,7 +53,7 @@ void fkt_compute_hash_caches(void) {
     }
     fkt_sha256_final(&ctx, tmp);
     memcpy(sha_outputs, tmp, 32);
-    fkt_sha256d(tmp, 32, hashOutputs);
+    fkt_sha256(tmp, 32, hashOutputs);
 
     /* sha_prevouts = SHA256(all outpoints) */
     fkt_sha256_init(&ctx);
@@ -156,25 +157,46 @@ int fkt_bip143_sighash(int input_index,
     return 0;
 }
 
-/* #### SECTION: BIP-143 sighash for P2WPKH (uses crypto for dsha256) #### */
-int fkt_bip143_sighash_p2sh_p2wpkh(int input_index,
-                                          const uint8_t redeem_script[22],
-                                          uint8_t sighash[32]) {
-    /* Same as fkt_bip143_sighash but scriptCode is the redeem script itself,
-       not the expanded P2WPKH script. The redeem script is exactly 22 bytes:
-       0x00 0x14 <20‑byte hash>. */
-    uint8_t preimage[256];
+static size_t fkt_write_script_compact(uint8_t *out, const uint8_t *script, size_t script_len) {
+    if (script_len < 0xFD) {
+        out[0] = (uint8_t)script_len;
+        memcpy(out + 1, script, script_len);
+        return 1 + script_len;
+    }
+    if (script_len <= 0xFFFF) {
+        out[0] = 0xFD;
+        out[1] = (uint8_t)(script_len & 0xFF);
+        out[2] = (uint8_t)((script_len >> 8) & 0xFF);
+        memcpy(out + 3, script, script_len);
+        return 3 + script_len;
+    }
+    return 0;
+}
+
+/* BIP-143 for native P2WSH (scriptCode = witness script with compact size prefix). */
+int fkt_bip143_sighash_p2wsh(int input_index,
+                             const uint8_t *witness_script, size_t witness_script_len,
+                             uint8_t sighash[32]) {
+    uint8_t preimage[600];
+    uint8_t script_code[530];
     uint8_t *ptr = preimage;
     uint32_t nVersion, nLockTime, nSequence;
     int64_t amount;
     uint8_t amount_le[8];
+    size_t script_code_len;
     int i;
+
+    if (witness_script == NULL || witness_script_len == 0 || witness_script_len > 520)
+        return -1;
 
     {
         const uint8_t *tx = psbt_data.raw_unsigned_tx;
         nVersion = (uint32_t)tx[0] | ((uint32_t)tx[1]<<8) | ((uint32_t)tx[2]<<16) | ((uint32_t)tx[3]<<24);
         nLockTime = psbt_data.locktime;
     }
+
+    script_code_len = fkt_write_script_compact(script_code, witness_script, witness_script_len);
+    if (script_code_len == 0) return -1;
 
     *ptr++ = (uint8_t)(nVersion & 0xFF);
     *ptr++ = (uint8_t)((nVersion >> 8) & 0xFF);
@@ -190,8 +212,7 @@ int fkt_bip143_sighash_p2sh_p2wpkh(int input_index,
     *ptr++ = (uint8_t)((psbt_data.input_vout[input_index] >> 16) & 0xFF);
     *ptr++ = (uint8_t)((psbt_data.input_vout[input_index] >> 24) & 0xFF);
 
-    /* scriptCode = redeem script (22 bytes) */
-    memcpy(ptr, redeem_script, 22); ptr += 22;
+    memcpy(ptr, script_code, script_code_len); ptr += script_code_len;
 
     amount = psbt_data.input_amount[input_index];
     for (i = 0; i < 8; i++) amount_le[i] = (uint8_t)(amount >> (8*i));
@@ -216,73 +237,55 @@ int fkt_bip143_sighash_p2sh_p2wpkh(int input_index,
     return 0;
 }
 
-/* Compute BIP-341 sighash (Taproot key-path) for a P2TR input.
- * Uses BIP-143-style preimage with sighash_type=0x00. */
+/* #### SECTION: BIP-143 sighash for P2WPKH (uses crypto for dsha256) #### */
+int fkt_bip143_sighash_p2sh_p2wpkh(int input_index,
+                                          const uint8_t redeem_script[22],
+                                          uint8_t sighash[32]) {
+    /* BIP-143: P2SH-wrapped P2WPKH uses the expanded P2PKH scriptCode
+       (0x19 0x76 0xa9 0x14 <hash> 0x88 0xac), not the 22-byte redeem script. */
+    return fkt_bip143_sighash(input_index, redeem_script, sighash);
+}
+
+/* BIP-341 key-path sighash (SIGHASH_DEFAULT = 0x00). */
 int fkt_bip341_sighash(int input_index, uint8_t sighash[32]) {
     uint8_t preimage[256];
     uint8_t *ptr = preimage;
     uint32_t nVersion, nLockTime;
-    uint32_t nSequence;
-    int64_t amount;
-    uint8_t amount_le[8];
-    int i;
+    const uint8_t *tx = psbt_data.raw_unsigned_tx;
 
-    {
-        const uint8_t *tx = psbt_data.raw_unsigned_tx;
-        nVersion = (uint32_t)tx[0] | ((uint32_t)tx[1]<<8) | ((uint32_t)tx[2]<<16) | ((uint32_t)tx[3]<<24);
-        nLockTime = psbt_data.locktime;
-    }
+    if (input_index < 0 || input_index >= psbt_data.num_inputs) return -1;
 
-    /* nVersion (4) */
+    nVersion = (uint32_t)tx[0] | ((uint32_t)tx[1] << 8) |
+               ((uint32_t)tx[2] << 16) | ((uint32_t)tx[3] << 24);
+    nLockTime = psbt_data.locktime;
+
+    *ptr++ = 0x00; /* epoch */
+    *ptr++ = 0x00; /* SIGHASH_DEFAULT */
+
     *ptr++ = (uint8_t)(nVersion & 0xFF);
     *ptr++ = (uint8_t)((nVersion >> 8) & 0xFF);
     *ptr++ = (uint8_t)((nVersion >> 16) & 0xFF);
     *ptr++ = (uint8_t)((nVersion >> 24) & 0xFF);
 
-    /* hashPrevouts (32) */
-    memcpy(ptr, hashPrevouts, 32); ptr += 32;
-
-    /* hashSequence (32) */
-    memcpy(ptr, hashSequence, 32); ptr += 32;
-
-    /* outpoint (32 txid + 4 vout LE) */
-    memcpy(ptr, psbt_data.input_txid[input_index], 32); ptr += 32;
-    *ptr++ = (uint8_t)(psbt_data.input_vout[input_index] & 0xFF);
-    *ptr++ = (uint8_t)((psbt_data.input_vout[input_index] >> 8) & 0xFF);
-    *ptr++ = (uint8_t)((psbt_data.input_vout[input_index] >> 16) & 0xFF);
-    *ptr++ = (uint8_t)((psbt_data.input_vout[input_index] >> 24) & 0xFF);
-
-    /* amount (8 bytes LE) */
-    amount = psbt_data.input_amount[input_index];
-    for (i = 0; i < 8; i++) amount_le[i] = (uint8_t)(amount >> (8*i));
-    memcpy(ptr, amount_le, 8); ptr += 8;
-
-    /* nSequence (4 bytes LE) */
-    nSequence = psbt_data.input_sequence[input_index];
-    *ptr++ = (uint8_t)(nSequence & 0xFF);
-    *ptr++ = (uint8_t)((nSequence >> 8) & 0xFF);
-    *ptr++ = (uint8_t)((nSequence >> 16) & 0xFF);
-    *ptr++ = (uint8_t)((nSequence >> 24) & 0xFF);
-
-    /* hashOutputs (32) */
-    memcpy(ptr, hashOutputs, 32); ptr += 32;
-
-    /* spend_type = 0 (key-path), scriptPath = 0 */
-    *ptr++ = 0x00; /* spend type */
-    *ptr++ = 0x00; /* no script path */
-
-    /* nLockTime (4) */
     *ptr++ = (uint8_t)(nLockTime & 0xFF);
     *ptr++ = (uint8_t)((nLockTime >> 8) & 0xFF);
     *ptr++ = (uint8_t)((nLockTime >> 16) & 0xFF);
     *ptr++ = (uint8_t)((nLockTime >> 24) & 0xFF);
 
-    /* sighash type = 0x00 */
-    *ptr++ = 0x00;
+    memcpy(ptr, sha_prevouts, 32); ptr += 32;
+    memcpy(ptr, sha_amounts, 32); ptr += 32;
+    memcpy(ptr, sha_scriptpubkeys, 32); ptr += 32;
+    memcpy(ptr, sha_sequences, 32); ptr += 32;
+    memcpy(ptr, sha_outputs, 32); ptr += 32;
 
-    /* SHA-256 of the preimage, then taproot requires tagged hash 'TapSighash' */
-    /* But we can just use a plain double SHA256? BIP-341 uses tagged SHA256.
-       For now, we'll use the standard dSHA256 which works for P2TR in test vectors. */
-    fkt_sha256(preimage, (size_t)(ptr - preimage), sighash);
+    *ptr++ = 0x00; /* spend_type: key-path, no annex */
+
+    *ptr++ = (uint8_t)(input_index & 0xFF);
+    *ptr++ = (uint8_t)((input_index >> 8) & 0xFF);
+    *ptr++ = (uint8_t)((input_index >> 16) & 0xFF);
+    *ptr++ = (uint8_t)((input_index >> 24) & 0xFF);
+
+    if (fkt_tagged_sha256("TapSighash", 10, preimage, (size_t)(ptr - preimage), sighash) != 0)
+        return -1;
     return 0;
 }
