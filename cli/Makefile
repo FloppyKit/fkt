@@ -1,6 +1,7 @@
 CC = gcc
-CFLAGS = -std=c89 -Wall -Wextra -I. -I/usr/include
-LDFLAGS = ../secp256k1/.libsecp256k1.a
+SECP_DIR = ../secp256k1-build
+CFLAGS = -std=c89 -Wall -Wextra -I. -I$(SECP_DIR)/include -DENABLE_MODULE_SCHNORRSIG -DENABLE_MODULE_EXTRAKEYS
+SECP_LIB = $(SECP_DIR)/libsecp256k1.a
 
 OBJS = main.o \
        fkt_error.o \
@@ -16,11 +17,31 @@ OBJS = main.o \
        fkt_sighash.o \
        fkt_signer.o
 
-fktsigner: $(OBJS)
-	$(CC) -o $@ $^ -lsecp256k1
+all: fktsigner verify_ecdsa
+
+.PHONY: test-sparrow sparrow-base64 clean
+
+$(SECP_LIB):
+	cd $(SECP_DIR) && gcc -std=c99 -O2 -Iinclude -Isrc -DENABLE_MODULE_SCHNORRSIG -DENABLE_MODULE_EXTRAKEYS -c src/secp256k1.c -o libsecp256k1_main.o
+	cd $(SECP_DIR) && gcc -std=c99 -O2 -Iinclude -Isrc -c src/precomputed_ecmult.c -o libsecp256k1_ecmult.o
+	cd $(SECP_DIR) && gcc -std=c99 -O2 -Iinclude -Isrc -c src/precomputed_ecmult_gen.c -o libsecp256k1_ecmult_gen.o
+	cd $(SECP_DIR) && ar rcs libsecp256k1.a libsecp256k1_main.o libsecp256k1_ecmult.o libsecp256k1_ecmult_gen.o
+
+fktsigner: $(OBJS) $(SECP_LIB)
+	$(CC) -o $@ $(OBJS) $(SECP_LIB)
+
+verify_ecdsa: verify_ecdsa.c $(SECP_LIB)
+	$(CC) $(CFLAGS) -o $@ verify_ecdsa.c $(SECP_LIB)
+
+test-sparrow: fktsigner verify_ecdsa
+	python3 tests/test_sparrow_real.py
+
+sparrow-base64: fktsigner
+	@test -n "$(PSBT)" || (echo "Usage: make sparrow-base64 PSBT=path/to/signed.psbt"; exit 1)
+	./fktsigner --base64 "$(PSBT)"
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 clean:
-	rm -f *.o fktsigner
+	rm -f *.o fktsigner verify_ecdsa
