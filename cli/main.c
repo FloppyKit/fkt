@@ -1,5 +1,9 @@
 /* main.c – FKT signer CLI */
 #include "fkt.h"
+#include "fkt_seed.h"
+#include "fkt_preview.h"
+#include "fkt_ui.h"
+#include "fkt_memzero.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -47,8 +51,70 @@ static int hex_decode(const char *hex, uint8_t *out, int max_out) {
     return len/2;
 }
 
-int main(int argc, char **argv) {
+static int fkt_psbt_sign_from_seed(const char *input_psbt, const char *output_psbt,
+                                   char words[MAX_WORDS][WORD_BUF], int num_words) {
+    char mnemonic[512];
+    uint8_t seed[64];
+    static const uint8_t salt[] = "mnemonic";
     int i;
+    int pos = 0;
+
+    for (i = 0; i < num_words; i++) {
+        size_t wlen;
+        if (i > 0) mnemonic[pos++] = ' ';
+        wlen = strlen(words[i]);
+        if (pos + (int)wlen >= (int)sizeof(mnemonic)) return -1;
+        memcpy(mnemonic + pos, words[i], wlen);
+        pos += (int)wlen;
+    }
+    mnemonic[pos] = '\0';
+
+    fkt_memzero_register_seed(seed, sizeof(seed));
+    fkt_memzero_register_mnemonic(mnemonic, sizeof(mnemonic));
+    fkt_memzero_register_words(words, sizeof(words[0]) * MAX_WORDS);
+
+    fkt_pbkdf2_hmac_sha512(mnemonic, (size_t)pos, salt, 8, 2048, seed, 64);
+    fkt_memzero(mnemonic, sizeof(mnemonic));
+    fkt_secp256k1_init();
+    if (fkt_sign_psbt(seed, "", input_psbt, output_psbt) != 0) {
+        fkt_memzero_wipe_all();
+        return -1;
+    }
+    fkt_memzero_wipe_all();
+    printf("ZEROED ALL KEY MATERIAL\n");
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    char words[MAX_WORDS][WORD_BUF];
+    int num_words = 0;
+    int i;
+
+    fkt_memzero_install_sigint();
+
+    if (argc == 3 && (strcmp(argv[1], "inspect") == 0 ||
+                        strcmp(argv[1], "preview") == 0)) {
+        fkt_ui_term_init();
+        return fkt_psbt_preview(argv[2]) != 0 ? 1 : 0;
+    }
+
+    if (argc >= 5 && strcmp(argv[1], "sign") == 0) {
+        if (fkt_seed_from_string(argv[4], words, &num_words)) {
+            printf("Mnemonic loaded (%d words)\n", num_words);
+            if (fkt_psbt_sign_from_seed(argv[2], argv[3], words, num_words) != 0) {
+                fprintf(stderr, "Signing failed.\n");
+                return 1;
+            }
+            return 0;
+        }
+        fprintf(stderr, "Invalid mnemonic string.\n");
+        return 1;
+    }
+
+    if (argc == 1) {
+        return fkt_ui_main_menu();
+    }
+
     if (argc == 4 && strcmp(argv[1], "--pubkey") == 0) {
         uint8_t seed[64];
         uint8_t child_priv[32], child_pub33[33];
@@ -85,7 +151,7 @@ int main(int argc, char **argv) {
     if (argc == 3 && strcmp(argv[1], "--base64") == 0) {
         FILE *f;
         long sz;
-        uint8_t *buf;
+        volatile uint8_t *buf;
         f = fopen(argv[2], "rb");
         if (!f) {
             fprintf(stderr, "Cannot open %s\n", argv[2]);
@@ -95,24 +161,29 @@ int main(int argc, char **argv) {
         sz = ftell(f);
         if (sz < 0 || (size_t)sz > FKT_PSBT_MAX_SIZE) { fclose(f); return 1; }
         rewind(f);
-        buf = (uint8_t *)malloc((size_t)sz);
+        buf = (volatile uint8_t *)malloc((size_t)sz);
         if (!buf) { fclose(f); return 1; }
-        if (fread(buf, 1, (size_t)sz, f) != (size_t)sz) {
-            free(buf);
+        if (fread((void *)buf, 1, (size_t)sz, f) != (size_t)sz) {
+            free((void *)buf);
             fclose(f);
             return 1;
         }
         fclose(f);
-        psbt_to_base64(buf, (size_t)sz);
-        free(buf);
+        fkt_memzero_register_b64((volatile void *)buf, (size_t)sz);
+        psbt_to_base64((const uint8_t *)buf, (size_t)sz);
+        fkt_memzero(buf, (size_t)sz);
+        free((void *)buf);
         return 0;
     }
 
     if (argc != 5) {
-        fprintf(stderr, "Usage: %s <seed_hex> <path> <input.psbt> <output.psbt>\n", argv[0]);
+        fprintf(stderr, "Usage: %s inspect <psbt> | preview <psbt>\n", argv[0]);
+        fprintf(stderr, "       %s sign <input.psbt> <output.psbt> \"seed phrase\"\n", argv[0]);
+        fprintf(stderr, "       %s <seed_hex> <path> <input.psbt> <output.psbt>\n", argv[0]);
         fprintf(stderr, "       %s --pubkey <seed_hex> <path>\n", argv[0]);
         fprintf(stderr, "       %s --parent-pubkey <seed_hex> <path> <pub33_hex> <in.psbt> <out.psbt>\n", argv[0]);
         fprintf(stderr, "       %s --base64 <signed.psbt>\n", argv[0]);
+        fprintf(stderr, "       %s  (interactive seed entry)\n", argv[0]);
         return 1;
     }
     {

@@ -4,6 +4,8 @@
 #include "fkt_hash160.h"
 #include "fkt_bip32.h"
 #include "fkt_secp256k1.h"
+#include "fkt_finalizer.h"
+#include "fkt_memzero.h"
 #include "fkt_compat.h"
 #include <string.h>
 #include <stdio.h>
@@ -34,8 +36,8 @@ static void fkt_debug_master_fp(const uint8_t seed[64]) {
         fkt_hash160(master_pub, 33, hash20);
         fkt_debug_hex("master fingerprint", hash20, 4);
     }
-    fkt_zerobytes(master_priv, 32);
-    fkt_zerobytes(master_chain, 32);
+    fkt_memzero(master_priv, 32);
+    fkt_memzero(master_chain, 32);
 }
 #else
 #define fkt_debug_hex(label, buf, len) ((void)0)
@@ -374,10 +376,10 @@ static int fkt_derive_input_keys(const uint8_t seed[64],
     return -1;
 }
 
-static int fkt_sign_loaded_psbt(const uint8_t seed[64],
-                                const char *path_override,
-                                const uint8_t *parent_pub_override,
-                                const char *output_file) {
+int fkt_sign_loaded_psbt(const uint8_t seed[64],
+                         const char *path_override,
+                         const uint8_t *parent_pub_override,
+                         const char *output_file) {
     int i;
     FILE *fout = NULL;
     int ok = -1;
@@ -385,6 +387,7 @@ static int fkt_sign_loaded_psbt(const uint8_t seed[64],
     secp256k1_context *ctx = fkt_secp256k1_ctx();
 
     fkt_debug_master_fp(seed);
+    fkt_signer_clear_signed_inputs();
 
     for (i = 0; i < psbt_data.num_inputs; i++) {
         uint8_t child_priv[32], child_pub33[33];
@@ -396,6 +399,10 @@ static int fkt_sign_loaded_psbt(const uint8_t seed[64],
         }
         fkt_debug_hex("derived child privkey", child_priv, 32);
         fkt_hash160(child_pub33, 33, hash20);
+
+        if (psbt_data.input_had_final_witness[i]) {
+            continue;
+        }
 
         if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2TR) {
             uint8_t sighash[32];
@@ -413,14 +420,20 @@ static int fkt_sign_loaded_psbt(const uint8_t seed[64],
                 fkt_remove_input_key_type(i, FKT_PSBT_IN_TAP_INTERNAL_KEY);
             }
 
+            if (!has_tap_int_key) {
+                printf("Taproot input %d missing internal key (0x17).\n", i);
+                goto cleanup;
+            }
+
             if (fkt_bip341_sighash(i, sighash) != 0) {
                 printf("Sighash error for input %d (Taproot)\n", i);
                 goto cleanup;
             }
             fkt_debug_hex("sighash", sighash, 32);
 
-            if (fkt_schnorr_sign_taproot(child_priv, sighash, NULL, 0, sig, &sig_len) != 0) {
-                printf("Schnorr signing failed for input %d\n", i);
+            if (fkt_schnorr_sign_taproot(child_priv, sighash, tap_int_key,
+                                         NULL, 0, sig, &sig_len) != 0) {
+                printf("Schnorr signing failed for input %d (check internal key)\n", i);
                 goto cleanup;
             }
             fkt_debug_hex("schnorr sig", sig, 64);
@@ -443,7 +456,13 @@ static int fkt_sign_loaded_psbt(const uint8_t seed[64],
                 }
             }
             signed_any = 1;
-            fkt_zerobytes(child_priv, 32);
+            fkt_signer_signed_inputs[i] = 1;
+            fkt_memzero(sighash, sizeof(sighash));
+            fkt_memzero(sig, sizeof(sig));
+            fkt_memzero(witness, sizeof(witness));
+            fkt_memzero(tap_int_key, sizeof(tap_int_key));
+            fkt_memzero(child_priv, sizeof(child_priv));
+            fkt_memzero(child_pub33, sizeof(child_pub33));
             continue;
         }
 
@@ -480,9 +499,13 @@ static int fkt_sign_loaded_psbt(const uint8_t seed[64],
                     printf("PSBT buffer overflow inserting partial sig for input %d\n", i);
                     goto cleanup;
                 }
+                fkt_memzero(sighash, sizeof(sighash));
+                fkt_memzero(der_sig, sizeof(der_sig));
             }
             signed_any = 1;
-            fkt_zerobytes(child_priv, 32);
+            fkt_signer_signed_inputs[i] = 1;
+            fkt_memzero(child_priv, sizeof(child_priv));
+            fkt_memzero(child_pub33, sizeof(child_pub33));
             continue;
         }
 
@@ -521,9 +544,13 @@ static int fkt_sign_loaded_psbt(const uint8_t seed[64],
                     printf("PSBT buffer overflow inserting partial sig for input %d\n", i);
                     goto cleanup;
                 }
+                fkt_memzero(sighash, sizeof(sighash));
+                fkt_memzero(der_sig, sizeof(der_sig));
             }
             signed_any = 1;
-            fkt_zerobytes(child_priv, 32);
+            fkt_signer_signed_inputs[i] = 1;
+            fkt_memzero(child_priv, sizeof(child_priv));
+            fkt_memzero(child_pub33, sizeof(child_pub33));
             continue;
         }
 
@@ -563,16 +590,28 @@ static int fkt_sign_loaded_psbt(const uint8_t seed[64],
                 goto cleanup;
             }
             signed_any = 1;
+            fkt_signer_signed_inputs[i] = 1;
+            fkt_memzero(sighash, sizeof(sighash));
+            fkt_memzero(der_sig, sizeof(der_sig));
         }
-        fkt_zerobytes(child_priv, 32);
-    }
-
-    if (!signed_any) {
-        printf("No inputs could be signed.\n");
-        goto cleanup;
+        fkt_memzero(child_priv, sizeof(child_priv));
+        fkt_memzero(child_pub33, sizeof(child_pub33));
     }
 
     fkt_cleanup_signed_psbt_maps();
+    fkt_psbt_finalize(seed, path_override, parent_pub_override);
+
+    if (!signed_any) {
+        int had_presigned = 0;
+        for (i = 0; i < psbt_data.num_inputs; i++) {
+            if (psbt_data.input_had_final_witness[i])
+                had_presigned = 1;
+        }
+        if (!had_presigned) {
+            printf("No inputs could be signed.\n");
+            goto cleanup;
+        }
+    }
 
     fout = fopen(output_file, "wb");
     if (!fout) { printf("Cannot open output file.\n"); goto cleanup; }
@@ -591,7 +630,9 @@ int fkt_sign_psbt(const uint8_t seed[64], const char *path_str,
     fkt_secp256k1_init();
     fkt_psbt_init();
     if (fkt_psbt_load_file(psbt_file) != 0) { printf("Failed to load PSBT.\n"); return -1; }
+    fkt_psbt_lenient_parse = 1;
     fkt_psbt_parse();
+    fkt_psbt_lenient_parse = 0;
     fkt_compute_hash_caches();
     return fkt_sign_loaded_psbt(seed, path_str, NULL, output_file);
 }
@@ -604,7 +645,9 @@ int fkt_sign_psbt_with_parent(const uint8_t seed[64],
     fkt_secp256k1_init();
     fkt_psbt_init();
     if (fkt_psbt_load_file(psbt_file) != 0) { printf("Failed to load PSBT.\n"); return -1; }
+    fkt_psbt_lenient_parse = 1;
     fkt_psbt_parse();
+    fkt_psbt_lenient_parse = 0;
     fkt_compute_hash_caches();
     return fkt_sign_loaded_psbt(seed, path_str, parent_pub33, output_file);
 }

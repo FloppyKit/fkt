@@ -3,6 +3,7 @@
 
 #include "fkt_compat.h"   /* uint8_t, uint32_t, etc. */
 #include <stddef.h>       /* size_t */
+#include <setjmp.h>
 
 /* -------------------------------------------------------------------------
  * PSBT constants (BIP-174)
@@ -93,6 +94,7 @@ typedef struct {
     int      input_has_deriv_path     [MAX_PSBT_ITEMS];
     uint8_t  input_deriv_parent_pub   [MAX_PSBT_ITEMS][33];
     int      input_has_deriv_parent_pub [MAX_PSBT_ITEMS];
+    int      input_had_final_witness    [MAX_PSBT_ITEMS];
 
     int64_t  output_amount      [MAX_PSBT_ITEMS];
     uint8_t  output_script      [MAX_PSBT_ITEMS][520];
@@ -129,7 +131,13 @@ void fkt_psbt_init(void);
 int  fkt_psbt_load_file(const char *path);
 int  fkt_psbt_load_base64(const char *b64_str);
 void fkt_psbt_parse(void);
-void fkt_psbt_preview(void);
+
+extern int fkt_psbt_lenient_parse;
+extern int fkt_psbt_fuzz_mode;
+extern jmp_buf fkt_psbt_fuzz_jmp;
+
+int  fkt_psbt_load_memory(const uint8_t *data, size_t len);
+int  fkt_psbt_try_parse(void);
 
 const uint8_t* fkt_get_witness_script(int input_index, size_t *out_len);
 

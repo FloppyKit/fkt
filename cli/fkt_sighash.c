@@ -2,6 +2,7 @@
 #include "fkt_psbt.h"          /* for psbt_data access */
 #include "fkt_sha256.h"
 #include "fkt_secp256k1.h"
+#include "fkt_memzero.h"
 #include <string.h>
 
 /* External data from fkt_psbt.c */
@@ -154,6 +155,7 @@ int fkt_bip143_sighash(int input_index,
     *ptr++ = 0x01; *ptr++ = 0x00; *ptr++ = 0x00; *ptr++ = 0x00;
 
     fkt_sha256d(preimage, (size_t)(ptr - preimage), sighash);
+    fkt_memzero(preimage, sizeof(preimage));
     return 0;
 }
 
@@ -234,6 +236,8 @@ int fkt_bip143_sighash_p2wsh(int input_index,
     *ptr++ = 0x01; *ptr++ = 0x00; *ptr++ = 0x00; *ptr++ = 0x00;
 
     fkt_sha256d(preimage, (size_t)(ptr - preimage), sighash);
+    fkt_memzero(preimage, sizeof(preimage));
+    fkt_memzero(script_code, sizeof(script_code));
     return 0;
 }
 
@@ -285,7 +289,10 @@ int fkt_bip341_sighash(int input_index, uint8_t sighash[32]) {
     *ptr++ = (uint8_t)((input_index >> 16) & 0xFF);
     *ptr++ = (uint8_t)((input_index >> 24) & 0xFF);
 
-    if (fkt_tagged_sha256("TapSighash", 10, preimage, (size_t)(ptr - preimage), sighash) != 0)
+    if (fkt_tagged_sha256("TapSighash", 10, preimage, (size_t)(ptr - preimage), sighash) != 0) {
+        fkt_memzero(preimage, sizeof(preimage));
         return -1;
+    }
+    fkt_memzero(preimage, sizeof(preimage));
     return 0;
 }

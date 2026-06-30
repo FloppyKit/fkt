@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../cli/fkt_psbt.h"
+#include "../fkt_preview.h"
 
 int main(int argc, char *argv[]) {
     int show_preview = 0;
@@ -14,15 +14,8 @@ int main(int argc, char *argv[]) {
         show_preview = 1;
     }
 
-    fkt_psbt_init();
-    if (fkt_psbt_load_file(argv[1]) != 0) {
-        fprintf(stderr, "Error loading PSBT file: %s\n", argv[1]);
-        return 1;
-    }
-    fkt_psbt_parse();   /* may call fkt_psbt_die() -> exit(1) */
-
     if (show_preview) {
-        fkt_psbt_preview();
+        return fkt_psbt_preview(argv[1]) != 0 ? 1 : 0;
     }
     return 0;
 }
