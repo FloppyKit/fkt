@@ -1,6 +1,9 @@
 *.psbt
 *.b64
 *.txt
+!docs/DOS_README.TXT
+dos-obj/
+FKTSIGNER.EXE
 secp256k1-build/
 fs/
 broadcast-ready-today.txt

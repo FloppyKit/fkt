@@ -49,13 +49,16 @@ else
 OBJS = $(BASE_OBJS)
 endif
 
-.PHONY: all warm fktsigner-release test-sparrow test-qr test-parse sparrow-base64 clean fuzz fuzz-corpus
+.PHONY: all warm fktsigner-release fktsigner-dos test-sparrow test-qr test-parse sparrow-base64 clean fuzz fuzz-corpus
 
 all: fktsigner fkt verify_ecdsa
 
 fktsigner-release:
 	$(MAKE) clean
 	$(MAKE) DEV_HARNESS=0 NO_FINALIZER=1 fktsigner
+
+fktsigner-dos:
+	$(MAKE) -f Makefile.dos
 
 warm:
 	$(MAKE) WARM=1 fktsigner fkt

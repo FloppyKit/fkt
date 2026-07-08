@@ -1,15 +1,20 @@
-/* fkt_tty.c - terminal size, raw mode, key input (Linux path; DOS in PR3) */
+/* fkt_tty.c - terminal size, raw mode, key input */
+#if !(defined(FKT_DOS) && FKT_DOS)
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include "fkt_platform.h"
 #include <stdio.h>
 #include <stdlib.h>
 
-/* fkt_tty_restore uses fkt_screen_cursor_show (fkt_screen.c). */
-
 #if FKT_PLATFORM_LINUX
 #include <termios.h>
 #include <unistd.h>
+#endif
+
+#if FKT_PLATFORM_DOS
+#include <conio.h>
+#include <dos.h>
 #endif
 
 static int g_tty_cols = 80;
@@ -21,8 +26,23 @@ static struct termios g_tty_orig;
 static int g_tty_orig_saved = 0;
 #endif
 
+#if FKT_PLATFORM_DOS
+static void fkt_dos_query_screen(void) {
+    union REGS regs;
+
+    regs.x.ax = 0x0F00;
+    int86(0x10, &regs, &regs);
+    g_tty_cols = (int)regs.h.al;
+    if (g_tty_cols < 40)
+        g_tty_cols = 80;
+    g_tty_rows = 25;
+}
+#endif
+
 int fkt_tty_init(void) {
+#if FKT_PLATFORM_LINUX
     FILE *fp;
+#endif
 
     g_tty_cols = 80;
     g_tty_rows = 24;
@@ -44,6 +64,8 @@ int fkt_tty_init(void) {
         g_tty_orig_saved = 1;
         atexit(fkt_tty_restore);
     }
+#elif FKT_PLATFORM_DOS
+    fkt_dos_query_screen();
 #endif
 
     if (g_tty_cols < 40)
@@ -57,10 +79,10 @@ void fkt_tty_restore(void) {
 #if FKT_PLATFORM_LINUX
     if (g_tty_orig_saved)
         tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_tty_orig);
+    fputs("\033[0m", stdout);
 #endif
     g_tty_raw = 0;
     fkt_screen_cursor_show();
-    fputs("\033[0m", stdout);
     fflush(stdout);
 }
 
@@ -105,7 +127,11 @@ int fkt_tty_raw_end(void) {
 }
 
 int fkt_tty_read_key(void) {
+#if FKT_PLATFORM_DOS
+    return getch();
+#else
     return getchar();
+#endif
 }
 
 int fkt_tty_read_key_once(void) {
@@ -124,6 +150,8 @@ int fkt_tty_read_key_once(void) {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
     ch = getchar();
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved);
+#elif FKT_PLATFORM_DOS
+    ch = getch();
 #else
     ch = getchar();
 #endif

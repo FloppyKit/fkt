@@ -1,5 +1,10 @@
+#if !(defined(FKT_DOS) && FKT_DOS)
+#define _DEFAULT_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "fkt_psbt.h"
+#include "fkt_platform.h"
 #include "fkt_error.h"
 #include "fkt_sha256.h"
 #include <stddef.h>
@@ -8,8 +13,11 @@
 #include <stdlib.h>
 #include <setjmp.h>
 #include <limits.h>
-#include <unistd.h>
 #include <errno.h>
+
+#if FKT_PLATFORM_LINUX || FKT_PLATFORM_DOS
+#include <unistd.h>
+#endif
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -90,8 +98,46 @@ static int read_file(const char *path, uint8_t *buf, size_t max_size, size_t *ou
     return 0;
 }
 
+static char g_psbt_argv0_dir[PATH_MAX];
+
+void fkt_psbt_set_argv0(const char *argv0) {
+    char *slash;
+
+    g_psbt_argv0_dir[0] = '\0';
+    if (!argv0 || argv0[0] == '\0')
+        return;
+    strncpy(g_psbt_argv0_dir, argv0, sizeof(g_psbt_argv0_dir) - 1);
+    g_psbt_argv0_dir[sizeof(g_psbt_argv0_dir) - 1] = '\0';
+    slash = strrchr(g_psbt_argv0_dir, '/');
+    if (!slash)
+        slash = strrchr(g_psbt_argv0_dir, '\\');
+    if (slash)
+        *slash = '\0';
+}
+
+static int fkt_path_is_absolute(const char *path) {
+    if (!path || path[0] == '\0')
+        return 0;
+#if FKT_PLATFORM_DOS
+    if (path[0] == '/' || path[0] == '\\')
+        return 1;
+    if (path[1] == ':')
+        return 1;
+    return 0;
+#else
+    return path[0] == '/' ? 1 : 0;
+#endif
+}
+
 static int fkt_exe_dir(char *buf, size_t len) {
-#ifdef __linux__
+#if FKT_PLATFORM_DOS
+    if (g_psbt_argv0_dir[0] == '\0')
+        return -1;
+    if (strlen(g_psbt_argv0_dir) + 1 >= len)
+        return -1;
+    strcpy(buf, g_psbt_argv0_dir);
+    return 0;
+#elif defined(__linux__)
     char linkpath[PATH_MAX];
     ssize_t n;
     char *slash;
@@ -121,8 +167,10 @@ static int fkt_try_load_path(const char *candidate, uint8_t *buf, size_t max_siz
         return -1;
 
     report = candidate;
+#if FKT_PLATFORM_LINUX
     if (realpath(candidate, canon) != NULL)
         report = canon;
+#endif
     if (resolved && resolved_len > 0) {
         strncpy(resolved, report, resolved_len - 1);
         resolved[resolved_len - 1] = '\0';
@@ -143,7 +191,7 @@ static int fkt_psbt_resolve_load(const char *path, uint8_t *buf, size_t max_size
 
     candidates[n++] = path;
 
-    if (path[0] != '/') {
+    if (!fkt_path_is_absolute(path)) {
         if (getcwd(cwd, sizeof(cwd)) != NULL) {
             snprintf(buf1, sizeof(buf1), "%s/%s", cwd, path);
             candidates[n++] = buf1;

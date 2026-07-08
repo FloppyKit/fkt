@@ -1,5 +1,8 @@
 /* main.c – FKT signer CLI */
+#if !(defined(FKT_DOS) && FKT_DOS)
 #define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "fkt.h"
 #include "fkt_seed.h"
 #include "fkt_preview.h"
@@ -273,6 +276,7 @@ int main(int argc, char **argv) {
     int i;
 
     fkt_memzero_install_sigint();
+    fkt_psbt_set_argv0(argv[0]);
     fkt_confirm_set_ui_mode(0);
 #if FKT_BUILD_DEV_HARNESS
     if (getenv("FKT_NO_CONFIRM") != NULL)

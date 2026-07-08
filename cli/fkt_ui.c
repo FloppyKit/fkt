@@ -1,5 +1,7 @@
 /* fkt_ui.c - shared terminal UI: retro ASCII frame (C89) */
+#if !(defined(FKT_DOS) && FKT_DOS)
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include "fkt_ui.h"
 #include "fkt_build.h"
@@ -22,9 +24,29 @@
 #include <string.h>
 #include <time.h>
 
+#if FKT_PLATFORM_LINUX || FKT_PLATFORM_DOS
+#include <unistd.h>
+#endif
+
 #define UI_GREEN     "\033[32m"
 #define UI_AMBER     "\033[33m"
 #define UI_PURPLE    "\033[35m"
+
+#if (defined(FKT_ASCII_ONLY) && FKT_ASCII_ONLY) || FKT_PLATFORM_DOS
+#define UI_HLINE       "-"
+#define UI_EM_DASH     "-"
+#define UI_BULLET_ON   "[*]"
+#define UI_BULLET_OFF  "[ ]"
+#define UI_BLOCK_FULL  "#"
+#define UI_BLOCK_EMPTY "."
+#else
+#define UI_HLINE       "\342\224\200"
+#define UI_EM_DASH     "\342\200\224"
+#define UI_BULLET_ON   "\342\227\217"
+#define UI_BULLET_OFF  "\342\227\213"
+#define UI_BLOCK_FULL  "\342\226\210"
+#define UI_BLOCK_EMPTY "\342\226\221"
+#endif
 
 
 #define UI_LEFT_LABEL  "FKT v0.1 - CLI Signer"
@@ -85,6 +107,8 @@ static const char *UI_DUMMY_WORDS[24] = {
 static const char *UI_SPINNER[] = { "|", "/", "-", "\\" };
 
 static const char *ui_green(void) {
+    if (!fkt_screen_has_ansi())
+        return "";
     return g_ui_theme_amber ? UI_AMBER : UI_GREEN;
 }
 
@@ -137,7 +161,7 @@ void fkt_ui_draw_separator(void) {
 
     fputs(ui_green(), stdout);
     for (i = 0; i < w; i++)
-        fputs("\342\224\200", stdout);
+        fputs(UI_HLINE, stdout);
     putchar('\n');
 }
 
@@ -190,11 +214,11 @@ void fkt_ui_pin_footer(const char *seed_st, const char *psbt_st) {
 }
 
 static const char *ui_seed_status(void) {
-    return g_seed_loaded ? "\342\227\217 loaded" : "\342\227\213 not loaded";
+    return g_seed_loaded ? UI_BULLET_ON " loaded" : UI_BULLET_OFF " not loaded";
 }
 
 static const char *ui_psbt_status(void) {
-    return g_psbt_path[0] ? "\342\227\217 loaded" : "\342\227\213 not loaded";
+    return g_psbt_path[0] ? UI_BULLET_ON " loaded" : UI_BULLET_OFF " not loaded";
 }
 
 void fkt_ui_pin_session_footer(void) {
@@ -399,7 +423,7 @@ int fkt_ui_show_qr_seed(const char words[][WORD_BUF], int num_words) {
     if (fkt_qr_encode_text(payload) != 0)
         return -1;
     return fkt_ui_show_qr_encoded(FKT_QR_TERM_MAX_SEED_MODULES,
-                                  "SEED BACKUP \342\200\224 SCAN WITH PHONE");
+                                  "SEED BACKUP " UI_EM_DASH " SCAN WITH PHONE");
 }
 
 static int ui_choice_is_qr(const char *line) {
@@ -424,12 +448,12 @@ static void ui_echo_input(const char *buf, size_t len) {
 
     if (g_input_row <= 0 || g_input_col <= 0)
         return;
-    printf("\033[%d;%dH", g_input_row, g_input_col);
+    fkt_screen_goto(g_input_row, g_input_col);
     fputs(ui_green(), stdout);
     fputs(buf, stdout);
     putchar(' ');
     col = g_input_col + (int)len;
-    printf("\033[%d;%dH", g_input_row, col);
+    fkt_screen_goto(g_input_row, col);
     fflush(stdout);
 }
 
@@ -524,7 +548,7 @@ static void ui_box_row_at(int row, const char *text, int center) {
     char inner[GRID_INNER_W + 1];
 
     ui_box_pack_inner(inner, text, center);
-    printf("\033[%d;1H\033[2K", row);
+    fkt_screen_clear_line(row);
     fputs(ui_green(), stdout);
     ui_put_hpad(GRID_VISIBLE);
     putchar('|');
@@ -536,7 +560,7 @@ static void ui_box_row_at(int row, const char *text, int center) {
 static void ui_box_edge_at(int row) {
     int i;
 
-    printf("\033[%d;1H\033[2K", row);
+    fkt_screen_clear_line(row);
     fputs(ui_green(), stdout);
     ui_put_hpad(GRID_VISIBLE);
     putchar('+');
@@ -577,7 +601,7 @@ static void ui_draw_wallet_wordcount_screen(void) {
     ui_box_row_at(top + 10, "", 0);
     ui_box_row_at(top + 11, "", 0);
     ui_box_edge_at(top + 12);
-    fkt_ui_pin_footer("\342\227\213 not loaded", "\342\227\213 not loaded");
+    fkt_ui_pin_footer(UI_BULLET_OFF " not loaded", UI_BULLET_OFF " not loaded");
     cursor_col = ui_hpad(GRID_VISIBLE) + 2 + GRID_PAD_H +
                  (int)strlen(WALLET_BOX_PROMPT) + 1;
     fkt_ui_set_input_pos(prompt_row, cursor_col);
@@ -695,7 +719,7 @@ static void ui_draw_load_psbt_screen(void) {
     fkt_ui_body_printf("PSBT file path or paste base64:\n");
     if (g_psbt_load_err[0])
         fkt_ui_body_printf("[!] %s\n", g_psbt_load_err);
-    printf("\033[%d;1H\033[2K", prompt_row);
+    fkt_screen_clear_line(prompt_row);
     fputs(ui_green(), stdout);
     ui_put_hpad(UI_BODY_W);
     fputs("> ", stdout);
@@ -771,7 +795,7 @@ static void ui_draw_sign_screen(int done) {
     if (!done) {
         fkt_ui_body_printf("Output filename [press Enter for default]:\n");
         fkt_ui_body_printf("default: %s\n", SIGN_DEFAULT_OUT);
-        printf("\033[%d;1H\033[2K", prompt_row);
+        fkt_screen_clear_line(prompt_row);
         fputs(ui_green(), stdout);
         ui_put_hpad(UI_BODY_W);
         fputs("> ", stdout);
@@ -825,7 +849,7 @@ static void ui_draw_show_seed_screen(void) {
 
     fkt_ui_clear_screen();
     ui_draw_top_banner();
-    fkt_ui_draw_subtitle("SEED \342\200\224 WRITE THIS DOWN");
+    fkt_ui_draw_subtitle("SEED " UI_EM_DASH " WRITE THIS DOWN");
     fkt_ui_body_puts("SECURITY WARNING: Never share these words. Anyone with them");
     fkt_ui_body_puts("can steal your funds. Write on paper and store offline.");
     fkt_ui_body_puts("");
@@ -861,7 +885,7 @@ static void ui_draw_generated_seed_screen(const char words[][WORD_BUF], int num_
 
     fkt_ui_clear_screen();
     ui_draw_top_banner();
-    fkt_ui_draw_subtitle("GENERATED SEED \342\200\224 WRITE THIS DOWN");
+    fkt_ui_draw_subtitle("GENERATED SEED " UI_EM_DASH " WRITE THIS DOWN");
     fkt_ui_body_puts("SECURITY WARNING: Never share these words. Anyone with them");
     fkt_ui_body_puts("can steal your funds. Write on paper and store offline.");
     fkt_ui_body_puts("");
@@ -891,7 +915,7 @@ static void ui_draw_entropy_bar(int pct) {
 
     pos = snprintf(line, sizeof(line), "Entropy collected: %4d bits   [", bits);
     for (i = 0; i < 30 && pos < (int)sizeof(line) - 8; i++) {
-        const char *ch = i < filled ? "\342\226\210" : "\342\226\221";
+        const char *ch = i < filled ? UI_BLOCK_FULL : UI_BLOCK_EMPTY;
         pos += snprintf(line + pos, sizeof(line) - (size_t)pos, "%s", ch);
     }
     snprintf(line + pos, sizeof(line) - (size_t)pos, "]  %3d%%", pct);
@@ -920,7 +944,7 @@ static void ui_draw_entropy_screen(int pct, int roll, int spin_frame, int animat
                                    int locked, int quantum_flash, int num_words) {
     fkt_ui_clear_screen();
     ui_draw_top_banner();
-    fkt_ui_draw_subtitle("CREATE NEW WALLET \342\200\224 ENTROPY RITUAL");
+    fkt_ui_draw_subtitle("CREATE NEW WALLET " UI_EM_DASH " ENTROPY RITUAL");
     fkt_ui_body_puts("Provide your own randomness. Press Space to roll dice.");
     fkt_ui_body_puts("");
     ui_draw_entropy_bar(pct);
@@ -933,7 +957,7 @@ static void ui_draw_entropy_screen(int pct, int roll, int spin_frame, int animat
 
         if (animate)
             snprintf(roll_line, sizeof(roll_line),
-                     "Roll: *%2d   Spin: %s  \342\227\217",
+                     "Roll: *%2d   Spin: %s  " UI_BULLET_ON,
                      roll, UI_SPINNER[spin_frame & 3]);
         else
             snprintf(roll_line, sizeof(roll_line),
@@ -957,7 +981,7 @@ static void ui_draw_entropy_screen(int pct, int roll, int spin_frame, int animat
     }
     fkt_ui_body_puts("");
     fkt_ui_body_puts("Tip: This is more secure than most hardware wallets if you do it right.");
-    fkt_ui_pin_footer("\342\227\213 not loaded", "\342\227\213 not loaded");
+    fkt_ui_pin_footer(UI_BULLET_OFF " not loaded", UI_BULLET_OFF " not loaded");
     ui_hide_cursor();
     g_entropy_pct = pct;
     g_entropy_roll = roll;

@@ -1,6 +1,9 @@
 # Build artifacts
 *.o
 *.exe
+tools/djgpp/
+tools/build-djgpp-src/
+secp256k1-build-dos/
 *.bin
 *.elf
 

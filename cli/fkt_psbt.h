@@ -136,6 +136,7 @@ extern size_t   psbt_size;
 
 /* parser / preview API */
 void fkt_psbt_init(void);
+void fkt_psbt_set_argv0(const char *argv0);
 int  fkt_psbt_load_file(const char *path);
 int  fkt_psbt_load_base64(const char *b64_str);
 int  fkt_psbt_bytes_to_base64(const uint8_t *data, size_t len, char *out, size_t out_max);

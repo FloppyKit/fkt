@@ -1,5 +1,7 @@
 /* fkt_file.c - portable file metadata checks */
+#if !(defined(FKT_DOS) && FKT_DOS)
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include "fkt_platform.h"
 #include <sys/stat.h>

@@ -6,8 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-
 static uint8_t g_fkt_qr_temp[FKT_QR_BUFFER_LEN];
 static uint8_t g_fkt_qr_code[FKT_QR_BUFFER_LEN];
 static int g_fkt_qr_ready = 0;

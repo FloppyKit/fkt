@@ -219,14 +219,15 @@ static void fkt_fb_end(void) {
 
 #if defined(__DJGPP__)
 static void fkt_dos_set_px(int x, int y, int dark) {
-    unsigned char far *fb;
+    unsigned char *fb;
     int offset;
 
     if (!g_dos_vga_on)
         return;
     if (x < 0 || y < 0 || x >= FKT_VGA_W || y >= FKT_VGA_H)
         return;
-    fb = (unsigned char far *)0xA0000000;
+    /* DJGPP DPMI maps VGA plane A at linear 0xA0000000. */
+    fb = (unsigned char *)0xA0000000;
     offset = y * 320 + x;
     fb[offset] = (unsigned char)(dark ? 0 : 15);
 }

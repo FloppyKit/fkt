@@ -1,10 +1,17 @@
 /* fkt_memzero.c – volatile secure zeroing + SIGINT wipe */
+#if !(defined(FKT_DOS) && FKT_DOS)
 #define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "fkt_memzero.h"
+#include "fkt_platform.h"
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+#if FKT_PLATFORM_LINUX
 #include <unistd.h>
+#endif
 
 static volatile uint8_t *g_seed;
 static size_t g_seed_len;
@@ -67,13 +74,21 @@ static void fkt_sigint_handler(int sig) {
     fkt_ui_term_restore();
     fkt_memzero_wipe_all();
     fprintf(stderr, "\nSIGINT — zeroed all key material.\n");
+#if FKT_PLATFORM_LINUX
     _exit(130);
+#else
+    exit(130);
+#endif
 }
 
 void fkt_memzero_install_sigint(void) {
+#if FKT_PLATFORM_LINUX
     struct sigaction sa;
     sa.sa_handler = fkt_sigint_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
+#else
+    signal(SIGINT, fkt_sigint_handler);
+#endif
 }
