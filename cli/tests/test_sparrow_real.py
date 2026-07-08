@@ -275,8 +275,10 @@ for filename in sorted(os.listdir(UNSIGNED_DIR)):
         failed += 1
         continue
 
+    env = os.environ.copy()
+    env["FKT_NO_CONFIRM"] = "1"
     cmd = [SIGNER_BIN, seed_hex, path_str, unsigned, ours]
-    ret = subprocess.run(cmd, capture_output=True, text=True)
+    ret = subprocess.run(cmd, capture_output=True, text=True, env=env)
     if ret.returncode != 0:
         err = (ret.stderr or ret.stdout or "").strip()
         print(f"FAIL {filename}: signer error ({err})")

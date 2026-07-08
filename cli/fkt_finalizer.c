@@ -314,6 +314,11 @@ static int fkt_key_matches_input(int input_index, const uint8_t child_pub33[33])
         if (psbt_data.input_witness_script_len[input_index] != 22) return 0;
         return memcmp(hash20, psbt_data.input_witness_script[input_index] + 2, 20) == 0;
     }
+    if (psbt_data.input_script_type[input_index] == SCRIPT_TYPE_P2PKH) {
+        if (!psbt_data.input_has_witness_script[input_index]) return 0;
+        if (psbt_data.input_witness_script_len[input_index] != 25) return 0;
+        return memcmp(hash20, psbt_data.input_witness_script[input_index] + 3, 20) == 0;
+    }
     if (psbt_data.input_script_type[input_index] == SCRIPT_TYPE_P2SH_P2WPKH) {
         if (!psbt_data.input_has_redeem_script[input_index]) return 0;
         if (psbt_data.input_redeem_script_len[input_index] != 22) return 0;

@@ -3,27 +3,39 @@
 
 #include "fkt_preview.h"
 #include "fkt_psbt.h"
+#include "fkt_error.h"
 #include "fkt_ui.h"
 #include <stdio.h>
+#include <stdarg.h>
 #include <string.h>
 
-#define PREVIEW_GREEN   "\033[1;32m"
-#define PREVIEW_DIM     "\033[32m"
-#define PREVIEW_RESET   "\033[0m"
-#define PREVIEW_BG      "\033[40m"
+static void preview_color(void) {
+    fputs(fkt_ui_green_str(), stdout);
+}
 
 static void preview_puts(const char *s) {
-    fputs(PREVIEW_GREEN PREVIEW_BG, stdout);
-    fputs(s, stdout);
-    fputs(PREVIEW_RESET "\n", stdout);
+    fkt_ui_body_puts(s);
+}
+
+static void preview_body_printf(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    fputs(fkt_ui_green_str(), stdout);
+    {
+        int col = fkt_ui_body_col();
+        int i;
+        for (i = 1; i < col; i++)
+            putchar(' ');
+    }
+    vprintf(fmt, ap);
+    va_end(ap);
 }
 
 static void print_txid_reversed(const uint8_t txid[32]) {
     int i;
-    fputs(PREVIEW_GREEN PREVIEW_BG, stdout);
+    preview_color();
     for (i = 31; i >= 0; i--)
         printf("%02x", txid[i]);
-    fputs(PREVIEW_RESET, stdout);
 }
 
 static const char *input_script_label(uint8_t st) {
@@ -33,6 +45,7 @@ static const char *input_script_label(uint8_t st) {
     case SCRIPT_TYPE_P2TR:        return "P2TR";
     case SCRIPT_TYPE_P2SH:        return "P2SH";
     case SCRIPT_TYPE_P2SH_P2WPKH: return "Nested (P2SH-P2WPKH)";
+    case SCRIPT_TYPE_P2PKH:       return "P2PKH";
     default:                      return "Unknown";
     }
 }
@@ -46,28 +59,86 @@ static const char *output_script_label(const uint8_t *spk, size_t len) {
     return "Unknown";
 }
 
-static void print_output_address(const uint8_t *spk, size_t len) {
+static void print_hex_full(const uint8_t *buf, size_t len) {
+    size_t i;
+    for (i = 0; i < len; i++)
+        printf("%02x", buf[i]);
+}
+
+static void print_output_program(const uint8_t *spk, size_t len) {
+    preview_color();
+    if (len == 22 && spk[0] == 0x00 && spk[1] == 0x14) {
+        printf("v0_pkh_20B:");
+        print_hex_full(spk + 2, 20);
+    } else if (len == 34 && spk[0] == 0x51 && spk[1] == 0x20) {
+        printf("v1_tap_32B:");
+        print_hex_full(spk + 2, 32);
+    } else if (len >= 23 && spk[0] == 0xa9 && spk[1] == 0x14) {
+        printf("p2sh_hash20B:");
+        print_hex_full(spk + 2, 20);
+    } else if (len >= 25 && spk[0] == 0x76 && spk[1] == 0xa9 && spk[2] == 0x14) {
+        printf("pkh_hash20B:");
+        print_hex_full(spk + 3, 20);
+    } else if (len == 34 && spk[0] == 0x00 && spk[1] == 0x20) {
+        printf("v0_wsh_32B:");
+        print_hex_full(spk + 2, 32);
+    } else {
+        printf("script_%luB:", (unsigned long)len);
+        print_hex_full(spk, len);
+    }
+}
+
+static int preview_any_signed_input(void) {
+    int i;
+    for (i = 0; i < psbt_data.num_inputs; i++) {
+        if (psbt_data.input_had_final_witness[i] ||
+            psbt_data.input_had_final_scriptsig[i])
+            return 1;
+    }
+    return 0;
+}
+
+static void render_preview_debug(void) {
     int i;
 
-    fputs(PREVIEW_DIM PREVIEW_BG, stdout);
-    if (len == 22 && spk[0] == 0x00 && spk[1] == 0x14) {
-        printf("witv0:");
-        for (i = 0; i < 20; i++) printf("%02x", spk[2 + i]);
-    } else if (len == 34 && spk[0] == 0x51 && spk[1] == 0x20) {
-        printf("tap:");
-        for (i = 0; i < 32; i++) printf("%02x", spk[2 + i]);
-    } else if (len >= 23 && spk[0] == 0xa9 && spk[1] == 0x14) {
-        printf("sh:");
-        for (i = 0; i < 20; i++) printf("%02x", spk[2 + i]);
-    } else if (len >= 25 && spk[0] == 0x76 && spk[1] == 0xa9 && spk[2] == 0x14) {
-        printf("pkh:");
-        for (i = 0; i < 20; i++) printf("%02x", spk[3 + i]);
-    } else {
-        printf("script:");
-        for (i = 0; i < (int)len && i < 16; i++) printf("%02x", spk[i]);
-        if ((int)len > 16) printf("...");
+    if (!fkt_ui_debug_enabled())
+        return;
+
+    putchar('\n');
+    fputs("\033[35m", stdout);
+    printf("  -- DEBUG --\n");
+    printf("  PSBT bytes:    %lu\n", (unsigned long)psbt_size);
+    printf("  Inputs/Outs:   %d / %d\n",
+           psbt_data.num_inputs, psbt_data.num_outputs);
+    printf("  Unsigned tx:   %lu bytes\n",
+           (unsigned long)psbt_data.unsigned_tx_len);
+    printf("  Sign state:    %s\n",
+           preview_any_signed_input()
+               ? "SIGNED (final scriptSig or witness present)"
+               : "UNSIGNED (no final scriptSig or witness)");
+    printf("  PSBT SHA256:   ");
+    print_hex_full(psbt_data.psbt_fingerprint, 32);
+    putchar('\n');
+
+    for (i = 0; i < psbt_data.num_inputs; i++) {
+        printf("  in[%d] type=%u amt=%s spk=%s deriv=%s scriptSig=%s witness=%s\n",
+               i, (unsigned)psbt_data.input_script_type[i],
+               psbt_data.input_has_amount[i] ? "yes" : "no",
+               psbt_data.input_has_witness_script[i] ? "yes" : "no",
+               psbt_data.input_has_deriv_path[i] ? "yes" : "no",
+               psbt_data.input_had_final_scriptsig[i] ? "yes" : "no",
+               psbt_data.input_had_final_witness[i] ? "yes" : "no");
+        if (psbt_data.input_has_witness_script[i]) {
+            printf("        spk_%luB: ",
+                   (unsigned long)psbt_data.input_witness_script_len[i]);
+            print_hex_full(psbt_data.input_witness_script[i],
+                           psbt_data.input_witness_script_len[i]);
+            putchar('\n');
+        }
     }
-    fputs(PREVIEW_RESET, stdout);
+    printf("  (Programs above are full witness hashes, not bech32 addresses.)\n");
+    fputs("\033[0m", stdout);
+    preview_color();
 }
 
 static size_t estimate_vsize(void) {
@@ -80,6 +151,7 @@ static size_t estimate_vsize(void) {
         if (st == SCRIPT_TYPE_P2WPKH || st == SCRIPT_TYPE_P2SH_P2WPKH) twb += 109;
         else if (st == SCRIPT_TYPE_P2TR) twb += 65;
         else if (st == SCRIPT_TYPE_P2WSH) twb += 110;
+        else if (st == SCRIPT_TYPE_P2PKH) twb += 107;
         else twb += 107;
     }
     w = (size_t)psbt_data.unsigned_tx_len * 4 + twb;
@@ -104,19 +176,9 @@ static void render_preview(void) {
     uint32_t tx_version = 0;
     char path_buf[128];
     char lock_rbf[128];
-    int b;
 
     fkt_ui_draw_banner(1);
-
-    fputs(PREVIEW_GREEN PREVIEW_BG, stdout);
-    printf("\n  +");
-    for (b = 0; b < 50; b++) printf("-");
-    printf("+\n");
-    printf("  |     FKT PSBT PREVIEW  [READ-ONLY]          |\n");
-    printf("  +");
-    for (b = 0; b < 50; b++) printf("-");
-    printf("+\n");
-    fputs(PREVIEW_RESET, stdout);
+    fkt_ui_draw_subtitle("PREVIEW");
 
     if (psbt_data.unsigned_tx_len >= 4) {
         tx_version = (uint32_t)psbt_data.raw_unsigned_tx[0] |
@@ -125,13 +187,28 @@ static void render_preview(void) {
                      ((uint32_t)psbt_data.raw_unsigned_tx[3] << 24);
     }
 
-    fputs(PREVIEW_DIM PREVIEW_BG, stdout);
-    printf("  v0 (BIP-174) * TX v%u\n", (unsigned)tx_version);
-    printf("  Unsigned txid: ");
-    fputs(PREVIEW_RESET, stdout);
+    preview_body_printf("v0 (BIP-174) * TX v%u\n", (unsigned)tx_version);
+    preview_color();
+    {
+        int col = fkt_ui_body_col();
+        int i;
+        for (i = 1; i < col; i++)
+            putchar(' ');
+    }
+    fputs("Unsigned txid: ", stdout);
     print_txid_reversed(psbt_data.txid);
-    fputs(PREVIEW_DIM PREVIEW_BG, stdout);
-    printf("\n");
+    putchar('\n');
+
+    preview_color();
+    {
+        int col = fkt_ui_body_col();
+        int j;
+        for (j = 1; j < col; j++)
+            putchar(' ');
+    }
+    fputs("PSBT fingerprint (for confirmation): ", stdout);
+    print_hex_full(psbt_data.psbt_fingerprint, 32);
+    putchar('\n');
 
     if (psbt_data.locktime > 0)
         snprintf(lock_rbf, sizeof(lock_rbf),
@@ -143,14 +220,19 @@ static void render_preview(void) {
                  "nLockTime: %u * RBF: %s",
                  (unsigned)psbt_data.locktime,
                  any_rbf() ? "YES (BIP125)" : "no");
-    printf("  %s\n", lock_rbf);
-    fputs(PREVIEW_RESET, stdout);
+    preview_body_printf("%s\n", lock_rbf);
 
     preview_puts("");
-    preview_puts("  -- INPUTS --");
+    preview_puts("-- INPUTS --");
     for (i = 0; i < psbt_data.num_inputs; i++) {
-        fputs(PREVIEW_DIM PREVIEW_BG, stdout);
-        printf("  [%d] ", i);
+        preview_color();
+        {
+            int col = fkt_ui_body_col();
+            int j;
+            for (j = 1; j < col; j++)
+                putchar(' ');
+        }
+        printf("[%d] ", i);
         if (psbt_data.input_has_amount[i]) {
             printf("%lld sats  ", (long long)psbt_data.input_amount[i]);
             total_in += psbt_data.input_amount[i];
@@ -162,22 +244,26 @@ static void render_preview(void) {
             printf("  path %s", path_buf);
         if (psbt_data.input_sequence[i] < 0xFFFFFFFEu)
             printf("  [RBF]");
-        fputs(PREVIEW_RESET, stdout);
         putchar('\n');
     }
 
     preview_puts("");
-    preview_puts("  -- OUTPUTS --");
+    preview_puts("-- OUTPUTS --");
     for (i = 0; i < psbt_data.num_outputs; i++) {
         const uint8_t *spk = psbt_data.output_script[i];
         size_t slen = psbt_data.output_script_len[i];
 
-        fputs(PREVIEW_DIM PREVIEW_BG, stdout);
-        printf("  [%d] %lld sats  %s  ",
+        preview_color();
+        {
+            int col = fkt_ui_body_col();
+            int j;
+            for (j = 1; j < col; j++)
+                putchar(' ');
+        }
+        printf("[%d] %lld sats  %s  ",
                i, (long long)psbt_data.output_amount[i],
                output_script_label(spk, slen));
-        print_output_address(spk, slen);
-        fputs(PREVIEW_RESET, stdout);
+        print_output_program(spk, slen);
         putchar('\n');
         total_out += psbt_data.output_amount[i];
     }
@@ -185,36 +271,78 @@ static void render_preview(void) {
     fee = total_in - total_out;
     vsize = estimate_vsize();
 
+    render_preview_debug();
+
     preview_puts("");
-    fputs(PREVIEW_DIM PREVIEW_BG, stdout);
-    printf("  Fee:           %lld sats\n", (long long)fee);
+    preview_body_printf("Fee:           %lld sats\n", (long long)fee);
     if (vsize > 0 && fee >= 0)
-        printf("  Fee rate:      %llu sat/vB (est. vsize %lu)\n",
-               (unsigned long long)((uint64_t)fee / (uint64_t)vsize),
-               (unsigned long)vsize);
+        preview_body_printf("Fee rate:      %llu sat/vB (est. vsize %lu)\n",
+                            (unsigned long long)((uint64_t)fee / (uint64_t)vsize),
+                            (unsigned long)vsize);
     else
-        printf("  Fee rate:      n/a\n");
-    fputs(PREVIEW_RESET, stdout);
-    preview_puts("");
+        preview_body_printf("Fee rate:      n/a\n");
+}
+
+void fkt_psbt_preview_render(void) {
+    render_preview();
+}
+
+int fkt_psbt_preview_prepare(const char *psbt_path) {
+    if (!psbt_path || psbt_path[0] == '\0')
+        return -1;
+
+    fkt_psbt_init();
+    if (fkt_psbt_load_input(psbt_path) != 0) {
+        fkt_last_error_set("Failed to load PSBT file.");
+        return -1;
+    }
+
+    if (fkt_psbt_try_parse() != 0) {
+        fkt_psbt_init();
+        return -1;
+    }
+    return 0;
+}
+
+static void preview_draw_interactive_screen(void) {
+    fkt_ui_clear_screen();
+    fkt_psbt_preview_render();
+    fkt_ui_body_puts("");
+    fkt_ui_body_puts("[Q] QR PSBT   [Enter] Exit");
+    fkt_ui_pin_session_footer();
 }
 
 int fkt_psbt_preview(const char *psbt_path) {
+    char line[16];
+
     if (!psbt_path || psbt_path[0] == '\0') {
         fprintf(stderr, "Preview: missing PSBT path.\n");
         return -1;
     }
 
     fkt_ui_term_init();
-    fkt_ui_clear_screen();
-    fkt_psbt_init();
-    if (fkt_psbt_load_file(psbt_path) != 0) {
-        fprintf(stderr, "Preview: cannot load %s\n", psbt_path);
+    if (fkt_psbt_preview_prepare(psbt_path) != 0) {
+        const char *err = fkt_last_error_get();
+        if (err && err[0] != '\0')
+            fprintf(stderr, "Preview: %s\n", err);
+        else
+            fprintf(stderr, "Preview: invalid PSBT input.\n");
+        fkt_ui_term_restore();
         return -1;
     }
 
-    fkt_psbt_lenient_parse = 1;
-    fkt_psbt_parse();
-    render_preview();
-    fkt_psbt_lenient_parse = 0;
+    for (;;) {
+        preview_draw_interactive_screen();
+        if (!fkt_ui_read_line(line, sizeof(line), 0))
+            break;
+        if (line[0] == 'q' || line[0] == 'Q') {
+            if (fkt_ui_show_qr_loaded_psbt() != 0)
+                fkt_ui_body_puts("[!] Could not encode PSBT as QR.");
+            continue;
+        }
+        break;
+    }
+
+    fkt_ui_term_restore();
     return 0;
 }

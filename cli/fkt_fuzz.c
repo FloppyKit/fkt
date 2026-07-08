@@ -1,6 +1,7 @@
 /* fkt_fuzz.c – libFuzzer / AFL / corpus smoke harness for FKT PSBT pipeline */
 #define _POSIX_C_SOURCE 200809L
 #include "fkt_psbt.h"
+#include "fkt_confirm.h"
 #include "fkt_sighash.h"
 #include "fkt_signer.h"
 #include "fkt_finalizer.h"
@@ -74,6 +75,7 @@ static int fkt_fuzz_one_input(const uint8_t *data, size_t size) {
     if (size == 0 || size > FKT_FUZZ_MAX_INPUT)
         return 0;
 
+    fkt_confirm_set_enabled(0);
     saved_out = fkt_fuzz_quiet_begin();
     freopen("/dev/null", "w", stdout);
 

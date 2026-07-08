@@ -2,38 +2,45 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "fkt_ui.h"
+#include "fkt_build.h"
+#include "fkt_version.h"
 #include "fkt_seed.h"
 #include "fkt_preview.h"
+#include "fkt_confirm.h"
+#include "fkt_psbt.h"
 #include "fkt_bip39.h"
 #include "fkt_memzero.h"
+#include "fkt_error.h"
+#include "fkt_qr.h"
+#include "fkt_qr_vga.h"
+#include "fkt_sha256.h"
+#include "fkt_platform.h"
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <termios.h>
-#include <unistd.h>
 
-#define UI_BRIGHT  "\033[1;32m"
-#define UI_DIM     "\033[32m"
+#define UI_GREEN     "\033[32m"
+#define UI_AMBER     "\033[33m"
+#define UI_PURPLE    "\033[35m"
+
 
 #define UI_LEFT_LABEL  "FKT v0.1 - CLI Signer"
-#define UI_RIGHT_LABEL "AIR-GAPPED * OFFLINE"
-#define UI_LINE_W      80
+#define UI_BODY_W      66
 
 #define SIGN_DEFAULT_OUT "tx-2026-07-06-fkt.psbt"
 #define ENTROPY_TARGET_BITS 256
-
-#define MENU_PROMPT_ROW  13
-#define MENU_PROMPT_COL  29
-#define MENU_SEP_ROW     14
-#define MENU_FOOT_ROW    15
 
 #define WALLET_BOX_INNER  11
 #define WALLET_BOX_HEIGHT (WALLET_BOX_INNER + 2)
 
 #define ENTROPY_MEME_PCT 420
-#define UI_TOGGLE_LABEL  "?/Help D/Debug T/Theme"
+#define UI_TOGGLE_LABEL  "Toggle: ?/Help  !/Debug  #/Theme"
+#define FKT_UI_HK_NONE    0
+#define FKT_UI_HK_HANDLED 1
+#define FKT_UI_HK_MENU    2
 
 #define WALLET_BOX_TITLE "NEW SEED PHRASE (BIP39)"
 #define WALLET_BOX_PROMPT "Enter number of words (12 or 24): "
@@ -45,15 +52,28 @@
 
 static int g_ui_cols = 80;
 static int g_ui_rows = 24;
-static int g_ui_theme_bright = 1;
+static int g_ui_theme_amber = 0;
+static int g_ui_debug = 0;
+static int g_input_row = 0;
+static int g_input_col = 0;
+static int g_ui_input_hidden = 0;
+static void (*g_ui_redraw_cb)(void);
 
-static char g_psbt_path[512];
+static char g_psbt_path[FKT_PSBT_INPUT_MAX];
+static char g_psbt_load_err[80];
+static char g_sign_out_path[512];
 static int  g_seed_loaded = 0;
 static char g_session_words[MAX_WORDS][WORD_BUF];
 static int  g_session_num_words = 0;
 
-static struct termios g_saved_term;
 static int g_term_raw = 0;
+static int g_term_interactive = 0;
+
+static void ui_draw_sign_screen(int done);
+static void ui_draw_generated_seed_screen(const char words[][WORD_BUF], int num_words);
+static void ui_draw_entropy_screen(int pct, int roll, int spin_frame, int animate,
+                                   int locked, int quantum_flash, int num_words);
+static int ui_handle_global_hotkey(const char *choice);
 
 static const char *UI_DUMMY_WORDS[24] = {
     "abandon", "ability", "able", "about", "above", "absent",
@@ -65,7 +85,7 @@ static const char *UI_DUMMY_WORDS[24] = {
 static const char *UI_SPINNER[] = { "|", "/", "-", "\\" };
 
 static const char *ui_green(void) {
-    return g_ui_theme_bright ? UI_BRIGHT : UI_DIM;
+    return g_ui_theme_amber ? UI_AMBER : UI_GREEN;
 }
 
 const char *fkt_ui_green_str(void) {
@@ -73,84 +93,94 @@ const char *fkt_ui_green_str(void) {
 }
 
 void fkt_ui_term_init(void) {
-    FILE *fp;
+    fkt_tty_init();
+    g_ui_cols = fkt_tty_cols();
+    g_ui_rows = fkt_tty_rows();
+}
 
-    g_ui_cols = 80;
-    g_ui_rows = 24;
-    fp = popen("tput cols 2>/dev/null", "r");
-    if (fp) {
-        if (fscanf(fp, "%d", &g_ui_cols) != 1)
-            g_ui_cols = 80;
-        pclose(fp);
-    }
-    fp = popen("tput lines 2>/dev/null", "r");
-    if (fp) {
-        if (fscanf(fp, "%d", &g_ui_rows) != 1)
-            g_ui_rows = 24;
-        pclose(fp);
-    }
-    if (g_ui_cols < 40)
-        g_ui_cols = 80;
-    if (g_ui_rows < 12)
-        g_ui_rows = 24;
+void fkt_ui_term_restore(void) {
+    fkt_tty_restore();
+    g_term_raw = 0;
+    g_term_interactive = 0;
 }
 
 int fkt_ui_term_cols(void) { return g_ui_cols; }
 int fkt_ui_term_rows(void) { return g_ui_rows; }
 
 void fkt_ui_clear_screen(void) {
-    printf("\033[2J\033[H%s", ui_green());
+    fkt_screen_clear();
+    fputs(ui_green(), stdout);
     fflush(stdout);
 }
 
 int fkt_ui_theme_bright(void) {
-    return g_ui_theme_bright;
+    return !g_ui_theme_amber;
+}
+
+int fkt_ui_debug_enabled(void) {
+    return g_ui_debug;
 }
 
 void fkt_ui_toggle_theme(void) {
-    g_ui_theme_bright = !g_ui_theme_bright;
+    g_ui_theme_amber = !g_ui_theme_amber;
+}
+
+static int ui_line_w(void) {
+    if (g_ui_cols < 40)
+        return 40;
+    return g_ui_cols;
 }
 
 void fkt_ui_draw_separator(void) {
+    int w = ui_line_w();
+    int i;
+
     fputs(ui_green(), stdout);
-    fputs("────────────────────────────────────────────────────────────────────────────────\n",
-          stdout);
+    for (i = 0; i < w; i++)
+        fputs("\342\224\200", stdout);
+    putchar('\n');
 }
 
 void fkt_ui_draw_footer(const char *seed_st, const char *psbt_st) {
-    char left[72];
-    char line[UI_LINE_W + 1];
+    char left[96];
+    char line[256];
+    int lw;
     int left_len;
     int toggle_len;
     int toggle_at;
     int i;
 
-    snprintf(left, sizeof(left), "Seed %s | PSBT %s ", seed_st, psbt_st);
+    lw = ui_line_w();
+    if (lw > (int)sizeof(line) - 1)
+        lw = (int)sizeof(line) - 1;
+
+    snprintf(left, sizeof(left), "  Seed %s | PSBT %s", seed_st, psbt_st);
     left_len = (int)strlen(left);
     toggle_len = (int)strlen(UI_TOGGLE_LABEL);
-    toggle_at = UI_LINE_W - toggle_len;
+    toggle_at = lw - toggle_len;
     if (toggle_at < 0)
         toggle_at = 0;
 
-    fputs(ui_green(), stdout);
-    for (i = 0; i < UI_LINE_W; i++)
+    for (i = 0; i < lw; i++)
         line[i] = ' ';
-    line[UI_LINE_W] = '\0';
-    if (left_len > 0 && left_len < UI_LINE_W)
+    line[lw] = '\0';
+    if (left_len > toggle_at)
+        left_len = toggle_at;
+    if (left_len > 0)
         memcpy(line, left, (size_t)left_len);
-    if (toggle_at + toggle_len > UI_LINE_W)
-        toggle_at = UI_LINE_W - toggle_len;
     memcpy(line + toggle_at, UI_TOGGLE_LABEL, (size_t)toggle_len);
-    fputs(line, stdout);
+
+    fputs(ui_green(), stdout);
+    fwrite(line, 1, (size_t)lw, stdout);
     putchar('\n');
     fflush(stdout);
 }
 
 void fkt_ui_pin_footer(const char *seed_st, const char *psbt_st) {
     if (g_ui_rows >= 4) {
-        printf("\033[%d;1H\033[2K", g_ui_rows - 2);
+        fkt_screen_clear_line(g_ui_rows - 2);
         fkt_ui_draw_separator();
-        printf("\033[%d;1H\033[2K", g_ui_rows - 1);
+        fkt_screen_clear_line(g_ui_rows - 1);
         fkt_ui_draw_footer(seed_st, psbt_st);
     } else {
         printf("\n");
@@ -172,56 +202,79 @@ void fkt_ui_pin_session_footer(void) {
 }
 
 static void ui_draw_top_banner(void) {
-    char line[UI_LINE_W + 1];
+    char line[256];
+    int lw = ui_line_w();
     int left_len = (int)strlen(UI_LEFT_LABEL);
-    int right_len = (int)strlen(UI_RIGHT_LABEL);
+    int right_len = (int)strlen(FKT_WALLET_LABEL);
+    int dbg_at = (lw - 3) / 2;
     int i;
 
-    fputs(ui_green(), stdout);
-    for (i = 0; i < UI_LINE_W; i++)
+    if (lw > (int)sizeof(line) - 1)
+        lw = (int)sizeof(line) - 1;
+
+    for (i = 0; i < lw; i++)
         line[i] = ' ';
-    line[UI_LINE_W] = '\0';
+    line[lw] = '\0';
     memcpy(line, UI_LEFT_LABEL, (size_t)left_len);
-    memcpy(line + UI_LINE_W - right_len, UI_RIGHT_LABEL, (size_t)right_len);
-    fputs(line, stdout);
+    if (right_len < lw)
+        memcpy(line + lw - right_len, FKT_WALLET_LABEL, (size_t)right_len);
+    if (g_ui_debug)
+        memcpy(line + dbg_at, "DBG", 3);
+
+    fputs(ui_green(), stdout);
+    for (i = 0; i < lw; i++) {
+        if (g_ui_debug && i == dbg_at) {
+            fputs(UI_PURPLE, stdout);
+            fputs("DBG", stdout);
+            fputs(ui_green(), stdout);
+            i += 2;
+            continue;
+        }
+        putchar(line[i]);
+    }
     putchar('\n');
     fkt_ui_draw_separator();
 }
 
 static void ui_show_cursor(void) {
-    printf("\033[?25h");
-    fflush(stdout);
+    fkt_screen_cursor_show();
 }
 
 static void ui_hide_cursor(void) {
-    printf("\033[?25l");
-    fflush(stdout);
+    fkt_screen_cursor_hide();
+}
+
+static int ui_apply_cbreak(void) {
+    return fkt_tty_raw_begin();
 }
 
 static void ui_term_raw_on(void) {
-    struct termios t;
-
-    if (tcgetattr(STDIN_FILENO, &g_saved_term) != 0)
-        return;
-    t = g_saved_term;
-    t.c_lflag &= (tcflag_t)~(ICANON | ECHO);
-    t.c_cc[VMIN] = 1;
-    t.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &t);
-    g_term_raw = 1;
+    if (fkt_tty_raw_begin() == 0)
+        g_term_raw = 1;
 }
 
 static void ui_term_raw_off(void) {
     if (g_term_raw) {
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_saved_term);
-        g_term_raw = 0;
+        fkt_ui_term_restore();
+    } else {
+        ui_show_cursor();
     }
-    ui_show_cursor();
 }
 
 static void ui_place_cursor(int row, int col) {
-    printf("\033[%d;%dH", row, col);
-    fflush(stdout);
+    fkt_screen_goto(row, col);
+}
+
+static int ui_str_display_width(const char *s) {
+    int w = 0;
+    if (!s)
+        return 0;
+    while (*s) {
+        if (((unsigned char)*s & 0xC0) != 0x80)
+            w++;
+        s++;
+    }
+    return w;
 }
 
 static int ui_hpad(int width) {
@@ -233,6 +286,151 @@ static void ui_put_hpad(int width) {
     int pad = ui_hpad(width);
     while (pad-- > 0)
         putchar(' ');
+}
+
+static void ui_draw_centered_at(int row, const char *text) {
+    fkt_screen_clear_line(row);
+    fputs(ui_green(), stdout);
+    ui_put_hpad(ui_str_display_width(text));
+    fputs(text, stdout);
+    fflush(stdout);
+}
+
+static void ui_draw_at_col(int row, int col, const char *text) {
+    fkt_screen_clear_line(row);
+    fputs(ui_green(), stdout);
+    fkt_screen_goto(row, col);
+    fputs(text, stdout);
+    fflush(stdout);
+}
+
+int fkt_ui_body_col(void) {
+    return ui_hpad(UI_BODY_W) + 1;
+}
+
+void fkt_ui_draw_subtitle(const char *title) {
+    fputs(ui_green(), stdout);
+    putchar('\n');
+    ui_put_hpad(ui_str_display_width(title));
+    fputs(title, stdout);
+    putchar('\n');
+    putchar('\n');
+}
+
+void fkt_ui_body_puts(const char *text) {
+    fputs(ui_green(), stdout);
+    ui_put_hpad(UI_BODY_W);
+    fputs(text, stdout);
+    putchar('\n');
+}
+
+void fkt_ui_body_printf(const char *fmt, ...) {
+    va_list ap;
+
+    fputs(ui_green(), stdout);
+    ui_put_hpad(UI_BODY_W);
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+}
+
+static int fkt_ui_show_qr_encoded(int term_max_modules, const char *subtitle) {
+    fkt_ui_term_restore();
+    /* VGA (mode 13h on DOS) takes over the screen; skip text chrome when available. */
+    if (!fkt_qr_vga_available()) {
+        fkt_ui_clear_screen();
+        fkt_ui_draw_banner(1);
+        if (subtitle != NULL && subtitle[0] != '\0')
+            fkt_ui_draw_subtitle(subtitle);
+    }
+    fkt_qr_display_ex(fkt_ui_term_cols(), fkt_ui_term_rows(), 1, 0, term_max_modules);
+    fkt_qr_clear();
+    return 0;
+}
+
+int fkt_ui_show_qr_text(const char *text) {
+    if (!text || text[0] == '\0')
+        return -1;
+    if (fkt_qr_encode_text(text) != 0)
+        return -1;
+    return fkt_ui_show_qr_encoded(FKT_QR_TERM_MAX_MODULES, "SCAN QR");
+}
+
+int fkt_ui_show_qr_loaded_psbt(void) {
+    char b64[FKT_QR_MAX_PAYLOAD + 1];
+
+    if (fkt_psbt_loaded_to_base64(b64, sizeof(b64)) != 0)
+        return -1;
+    return fkt_ui_show_qr_text(b64);
+}
+
+int fkt_ui_show_qr_psbt_file(const char *path) {
+    char b64[FKT_QR_MAX_PAYLOAD + 1];
+
+    if (!path || path[0] == '\0')
+        return -1;
+    if (fkt_psbt_file_to_base64(path, b64, sizeof(b64)) != 0)
+        return -1;
+    return fkt_ui_show_qr_text(b64);
+}
+
+int fkt_ui_show_qr_seed(const char words[][WORD_BUF], int num_words) {
+    char payload[FKT_QR_MAX_PAYLOAD + 1];
+    size_t pos = 0;
+    int i;
+
+    if (!words || num_words < 1)
+        return -1;
+    for (i = 0; i < num_words; i++) {
+        size_t wlen;
+
+        if (i > 0) {
+            if (pos + 1 >= sizeof(payload))
+                return -1;
+            payload[pos++] = ' ';
+        }
+        wlen = strlen(words[i]);
+        if (pos + wlen >= sizeof(payload))
+            return -1;
+        memcpy(payload + pos, words[i], wlen);
+        pos += wlen;
+    }
+    payload[pos] = '\0';
+    if (fkt_qr_encode_text(payload) != 0)
+        return -1;
+    return fkt_ui_show_qr_encoded(FKT_QR_TERM_MAX_SEED_MODULES,
+                                  "SEED BACKUP \342\200\224 SCAN WITH PHONE");
+}
+
+static int ui_choice_is_qr(const char *line) {
+    return line && (line[0] == 'q' || line[0] == 'Q');
+}
+
+static int ui_choice_is_verify(const char *line) {
+    return line && (line[0] == 'v' || line[0] == 'V');
+}
+
+void fkt_ui_set_input_pos(int row, int col) {
+    g_input_row = row;
+    g_input_col = col;
+}
+
+void fkt_ui_set_redraw_cb(void (*fn)(void)) {
+    g_ui_redraw_cb = fn;
+}
+
+static void ui_echo_input(const char *buf, size_t len) {
+    int col;
+
+    if (g_input_row <= 0 || g_input_col <= 0)
+        return;
+    printf("\033[%d;%dH", g_input_row, g_input_col);
+    fputs(ui_green(), stdout);
+    fputs(buf, stdout);
+    putchar(' ');
+    col = g_input_col + (int)len;
+    printf("\033[%d;%dH", g_input_row, col);
+    fflush(stdout);
 }
 
 static void ui_grid_pack_inner(char *out, const char *text) {
@@ -382,8 +580,10 @@ static void ui_draw_wallet_wordcount_screen(void) {
     fkt_ui_pin_footer("\342\227\213 not loaded", "\342\227\213 not loaded");
     cursor_col = ui_hpad(GRID_VISIBLE) + 2 + GRID_PAD_H +
                  (int)strlen(WALLET_BOX_PROMPT) + 1;
+    fkt_ui_set_input_pos(prompt_row, cursor_col);
     ui_place_cursor(prompt_row, cursor_col);
     ui_show_cursor();
+    g_ui_redraw_cb = ui_draw_wallet_wordcount_screen;
 }
 
 static int ui_prompt_wallet_word_count(int *num_words) {
@@ -419,70 +619,177 @@ void fkt_show_seed_grid(const char words[][WORD_BUF], int num_words) {
 }
 
 static void ui_draw_main_menu(void) {
+    static const char *items[7] = {
+        "1. Load seed",
+        "2. Load PSBT",
+        "3. Preview transaction",
+        "4. Sign transaction",
+        "5. Show seed (with verification)",
+        "6. Create new wallet",
+        "0. Exit"
+    };
+    const char *title = "MAIN MENU";
+    const char *prompt = "Select option: ";
+    int max_w = ui_str_display_width(title);
+    int menu_col;
+    int row;
+    int i;
+    int input_col;
+    int block_h;
+    int avail;
+    int content_top;
+    int prompt_row;
+
+    for (i = 0; i < 7; i++) {
+        int iw = ui_str_display_width(items[i]);
+        if (iw > max_w)
+            max_w = iw;
+    }
+    {
+        int pw = ui_str_display_width(prompt);
+        if (pw > max_w)
+            max_w = pw;
+    }
+
+    menu_col = ui_hpad(max_w) + 1;
+    block_h = 1 + 2 + 7 + 1;
+    avail = g_ui_rows - FKT_UI_BANNER_ROWS - 3;
+    content_top = FKT_UI_BANNER_ROWS + 1 + (avail - block_h) / 2;
+    if (content_top < FKT_UI_BANNER_ROWS + 1)
+        content_top = FKT_UI_BANNER_ROWS + 1;
+    prompt_row = content_top + 1 + 2 + 7;
+
     fkt_ui_clear_screen();
     ui_draw_top_banner();
-    printf("                      FKT COLD WALLET \342\200\224 MAIN MENU\n");
-    printf("\n");
-    printf("             1. Load seed\n");
-    printf("             2. Load PSBT\n");
-    printf("             3. Preview transaction\n");
-    printf("             4. Sign transaction\n");
-    printf("             5. Show seed (with verification)\n");
-    printf("             6. Create new wallet\n");
-    printf("             0. Exit\n");
-    printf("\n");
-    printf("\033[%d;1H\033[2K             Select option: ", MENU_PROMPT_ROW);
-    printf("\033[%d;1H\033[2K", MENU_SEP_ROW);
-    fkt_ui_draw_separator();
-    printf("\033[%d;1H\033[2K", MENU_FOOT_ROW);
-    fkt_ui_draw_footer(ui_seed_status(), ui_psbt_status());
-    ui_place_cursor(MENU_PROMPT_ROW, MENU_PROMPT_COL);
+
+    row = content_top;
+    ui_draw_centered_at(row, title);
+    row += 2;
+    for (i = 0; i < 7; i++) {
+        ui_draw_at_col(row, menu_col, items[i]);
+        row++;
+    }
+
+    ui_draw_at_col(prompt_row, menu_col, prompt);
+    input_col = menu_col + (int)strlen(prompt);
+
+    fkt_ui_pin_session_footer();
+    fkt_ui_set_input_pos(prompt_row, input_col);
+    ui_place_cursor(prompt_row, input_col);
     ui_show_cursor();
+    g_ui_redraw_cb = ui_draw_main_menu;
 }
 
 static void ui_draw_load_psbt_screen(void) {
-    const int prompt_row = 8;
-    const int cursor_col = 5;
+    char cwd[512];
+    int body_col = fkt_ui_body_col();
+    int prompt_row = FKT_UI_BANNER_ROWS + 10;
 
     fkt_ui_clear_screen();
     ui_draw_top_banner();
-    printf("                      FKT COLD WALLET \342\200\224 LOAD PSBT\n\n");
-    printf("  PSBT file path or paste base64:\n");
-    printf("\033[%d;1H\033[2K  > ", prompt_row);
+    fkt_ui_draw_subtitle("LOAD PSBT");
+    if (getcwd(cwd, sizeof(cwd)) != NULL)
+        fkt_ui_body_printf("Working directory: %s\n\n", cwd);
+    else
+        fkt_ui_body_printf("Working directory: (unknown)\n\n");
+    fkt_ui_body_printf("PSBT file path or paste base64:\n");
+    if (g_psbt_load_err[0])
+        fkt_ui_body_printf("[!] %s\n", g_psbt_load_err);
+    printf("\033[%d;1H\033[2K", prompt_row);
+    fputs(ui_green(), stdout);
+    ui_put_hpad(UI_BODY_W);
+    fputs("> ", stdout);
     fkt_ui_pin_session_footer();
-    ui_place_cursor(prompt_row, cursor_col);
+    fkt_ui_set_input_pos(prompt_row, body_col + 2);
+    ui_place_cursor(prompt_row, body_col + 2);
     ui_show_cursor();
+    g_ui_redraw_cb = ui_draw_load_psbt_screen;
 }
 
-static void ui_draw_preview_wait_screen(void) {
+static void ui_trim_line(char *s) {
+    size_t len;
+    size_t start = 0;
+
+    if (!s)
+        return;
+    while (s[start] == ' ' || s[start] == '\t')
+        start++;
+    if (start > 0)
+        memmove(s, s + start, strlen(s + start) + 1);
+    len = strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t')) {
+        s[len - 1] = '\0';
+        len--;
+    }
+}
+
+static int ui_prompt_load_psbt(char *out, size_t out_len) {
+    for (;;) {
+        ui_draw_load_psbt_screen();
+        if (!fkt_ui_read_line(out, out_len, 1))
+            return 0;
+        ui_trim_line(out);
+        if (out[0] == '\0')
+            return 0;
+        if (fkt_psbt_load_input(out) == 0) {
+            g_psbt_load_err[0] = '\0';
+            return 1;
+        }
+        strncpy(g_psbt_load_err, "Not a valid PSBT file or base64.",
+                sizeof(g_psbt_load_err) - 1);
+        g_psbt_load_err[sizeof(g_psbt_load_err) - 1] = '\0';
+    }
+}
+
+static void ui_draw_preview_screen(void) {
+    int rows = fkt_ui_term_rows();
+    int prompt_row = rows > 10 ? rows - 3 : 8;
+
     fkt_ui_clear_screen();
-    ui_draw_top_banner();
-    printf("                      FKT COLD WALLET \342\200\224 PREVIEW\n\n");
-    printf("  [READ-ONLY] Press Enter to return...\n");
+    fkt_psbt_preview_render();
+    fkt_ui_body_puts("");
+    fkt_ui_body_puts("[Q] QR PSBT   [Enter] Return");
     fkt_ui_pin_session_footer();
+    fkt_ui_set_input_pos(prompt_row, fkt_ui_body_col());
+    ui_hide_cursor();
+    g_ui_redraw_cb = ui_draw_preview_screen;
+}
+
+static int g_ui_sign_screen_done;
+
+static void ui_redraw_sign_screen(void) {
+    ui_draw_sign_screen(g_ui_sign_screen_done);
 }
 
 static void ui_draw_sign_screen(int done) {
-    const int prompt_row = 7;
-    const int cursor_col = 5;
+    int body_col = fkt_ui_body_col();
+    int prompt_row = FKT_UI_BANNER_ROWS + 8;
 
     fkt_ui_clear_screen();
     ui_draw_top_banner();
-    printf("                      FKT COLD WALLET \342\200\224 SIGN\n\n");
+    fkt_ui_draw_subtitle("SIGN");
     if (!done) {
-        printf("  Output filename [default: %s]:\n", SIGN_DEFAULT_OUT);
-        printf("\033[%d;1H\033[2K  > ", prompt_row);
+        fkt_ui_body_printf("Output filename [press Enter for default]:\n");
+        fkt_ui_body_printf("default: %s\n", SIGN_DEFAULT_OUT);
+        printf("\033[%d;1H\033[2K", prompt_row);
+        fputs(ui_green(), stdout);
+        ui_put_hpad(UI_BODY_W);
+        fputs("> ", stdout);
         fkt_ui_pin_session_footer();
-        ui_place_cursor(prompt_row, cursor_col);
+        fkt_ui_set_input_pos(prompt_row, body_col + 2);
+        ui_place_cursor(prompt_row, body_col + 2);
         ui_show_cursor();
     } else {
-        printf("  Output filename [default: %s]:\n  > %s\n", SIGN_DEFAULT_OUT, SIGN_DEFAULT_OUT);
-        printf("  After signing you can:\n");
-        printf("    [S] Show as QR code   [B] Show as Base64   [Enter] Save & return\n\n");
-        printf("  Signing with loaded seed... done.\n");
-        printf("  [OK] Signed PSBT written.\n");
+        fkt_ui_body_printf("Output filename:\n> %s\n", g_sign_out_path);
+        fkt_ui_body_puts("");
+        fkt_ui_body_puts("[OK] Signed PSBT written.");
+        fkt_ui_body_puts("");
+        fkt_ui_body_puts("[Q] QR signed PSBT   [Enter] Return");
         fkt_ui_pin_session_footer();
+        fkt_ui_set_input_pos(FKT_UI_BANNER_ROWS + 14, body_col);
     }
+    g_ui_sign_screen_done = done;
+    g_ui_redraw_cb = ui_redraw_sign_screen;
 }
 
 static void ui_fill_show_words(char out[MAX_WORDS][WORD_BUF], int *num_words) {
@@ -506,33 +813,73 @@ static void ui_fill_show_words(char out[MAX_WORDS][WORD_BUF], int *num_words) {
 static void ui_draw_show_seed_screen(void) {
     char words[MAX_WORDS][WORD_BUF];
     int num_words;
+    const char *prompt = "[Q] QR backup   [V] Verify   [Enter] Return: ";
+    int prompt_row;
+    int prompt_col;
+    int grid_rows;
 
     ui_fill_show_words(words, &num_words);
+    grid_rows = num_words / 3;
+    if (grid_rows < 1)
+        grid_rows = 1;
+
     fkt_ui_clear_screen();
     ui_draw_top_banner();
-    printf("                      SEED \342\200\224 WRITE THIS DOWN\n\n");
-    printf("  SECURITY WARNING: Never share these words. Anyone with them\n");
-    printf("  can steal your funds. Write on paper and store offline.\n\n");
+    fkt_ui_draw_subtitle("SEED \342\200\224 WRITE THIS DOWN");
+    fkt_ui_body_puts("SECURITY WARNING: Never share these words. Anyone with them");
+    fkt_ui_body_puts("can steal your funds. Write on paper and store offline.");
+    fkt_ui_body_puts("");
     fkt_show_seed_grid(words, num_words);
-    printf("\n  [Q] QR   [V] Verify   [Enter] Return\n");
+    fkt_ui_body_puts("");
+
+    /* subtitle(3) + warnings(2) + gap(1) + grid frame(2) + rows + gap(1) after banner */
+    prompt_row = FKT_UI_BANNER_ROWS + 3 + 2 + 1 + 2 + grid_rows + 1;
+    prompt_col = fkt_ui_body_col() + (int)strlen(prompt);
+    ui_draw_at_col(prompt_row, fkt_ui_body_col(), prompt);
     fkt_ui_pin_session_footer();
+    fkt_ui_set_input_pos(prompt_row, prompt_col);
+    ui_place_cursor(prompt_row, prompt_col);
+    ui_show_cursor();
+    g_ui_redraw_cb = ui_draw_show_seed_screen;
+}
+
+static char g_gen_words[MAX_WORDS][WORD_BUF];
+static int  g_gen_num_words;
+
+static void ui_redraw_generated_seed_screen(void) {
+    ui_draw_generated_seed_screen(g_gen_words, g_gen_num_words);
 }
 
 static void ui_draw_generated_seed_screen(const char words[][WORD_BUF], int num_words) {
+    int i;
+
+    for (i = 0; i < num_words; i++) {
+        strncpy(g_gen_words[i], words[i], WORD_BUF - 1);
+        g_gen_words[i][WORD_BUF - 1] = '\0';
+    }
+    g_gen_num_words = num_words;
+
     fkt_ui_clear_screen();
     ui_draw_top_banner();
-    printf("                      GENERATED SEED \342\200\224 WRITE THIS DOWN\n\n");
-    printf("  SECURITY WARNING: Never share these words. Anyone with them\n");
-    printf("  can steal your funds. Write on paper and store offline.\n\n");
+    fkt_ui_draw_subtitle("GENERATED SEED \342\200\224 WRITE THIS DOWN");
+    fkt_ui_body_puts("SECURITY WARNING: Never share these words. Anyone with them");
+    fkt_ui_body_puts("can steal your funds. Write on paper and store offline.");
+    fkt_ui_body_puts("");
     fkt_show_seed_grid(words, num_words);
-    printf("\n  [Enter] Accept & load   [Esc] Discard\n");
+    fkt_ui_body_puts("");
+    fkt_ui_body_puts("[Q] show QR   [Enter] Accept & load   [Esc] Discard");
     fkt_ui_pin_session_footer();
+    g_ui_input_hidden = 1;
+    ui_hide_cursor();
+    g_ui_redraw_cb = ui_redraw_generated_seed_screen;
 }
 
 static void ui_draw_entropy_bar(int pct) {
     int filled;
     int i;
     int bits;
+    char line[160];
+    int pos;
 
     if (pct <= 100)
         filled = pct * 30 / 100;
@@ -542,63 +889,109 @@ static void ui_draw_entropy_bar(int pct) {
     if (bits > ENTROPY_TARGET_BITS * ENTROPY_MEME_PCT / 100)
         bits = ENTROPY_TARGET_BITS * ENTROPY_MEME_PCT / 100;
 
+    pos = snprintf(line, sizeof(line), "Entropy collected: %4d bits   [", bits);
+    for (i = 0; i < 30 && pos < (int)sizeof(line) - 8; i++) {
+        const char *ch = i < filled ? "\342\226\210" : "\342\226\221";
+        pos += snprintf(line + pos, sizeof(line) - (size_t)pos, "%s", ch);
+    }
+    snprintf(line + pos, sizeof(line) - (size_t)pos, "]  %3d%%", pct);
+
     fputs(ui_green(), stdout);
-    printf("  Entropy collected: %4d bits   [", bits);
-    for (i = 0; i < 30; i++)
-        printf("%s", i < filled ? "\342\226\210" : "\342\226\221");
-    printf("]  %3d%%\n", pct);
+    ui_put_hpad(UI_BODY_W);
+    fputs(line, stdout);
+    putchar('\n');
+}
+
+static int g_entropy_pct;
+static int g_entropy_roll;
+static int g_entropy_spin;
+static int g_entropy_animate;
+static int g_entropy_locked;
+static int g_entropy_quantum;
+static int g_entropy_num_words;
+
+static void ui_redraw_entropy_screen(void) {
+    ui_draw_entropy_screen(g_entropy_pct, g_entropy_roll, g_entropy_spin,
+                           g_entropy_animate, g_entropy_locked, g_entropy_quantum,
+                           g_entropy_num_words);
 }
 
 static void ui_draw_entropy_screen(int pct, int roll, int spin_frame, int animate,
                                    int locked, int quantum_flash, int num_words) {
     fkt_ui_clear_screen();
     ui_draw_top_banner();
-    printf("\n                      CREATE NEW WALLET \342\200\224 ENTROPY RITUAL\n\n");
-    printf("  Provide your own randomness. Press Space to roll dice.\n\n");
+    fkt_ui_draw_subtitle("CREATE NEW WALLET \342\200\224 ENTROPY RITUAL");
+    fkt_ui_body_puts("Provide your own randomness. Press Space to roll dice.");
+    fkt_ui_body_puts("");
     ui_draw_entropy_bar(pct);
-    printf("\n  Press Space repeatedly or wait between presses...\n");
-    printf("  (The longer / more chaotic the better)\n\n");
-    fputs(ui_green(), stdout);
-    printf("  Roll: *%2d   Spin: %s", roll, UI_SPINNER[spin_frame & 3]);
-    if (animate)
-        printf("  \342\227\217");
-    printf("\n");
+    fkt_ui_body_puts("");
+    fkt_ui_body_puts("Press Space repeatedly or wait between presses...");
+    fkt_ui_body_puts("(The longer / more chaotic the better)");
+    fkt_ui_body_puts("");
+    {
+        char roll_line[64];
+
+        if (animate)
+            snprintf(roll_line, sizeof(roll_line),
+                     "Roll: *%2d   Spin: %s  \342\227\217",
+                     roll, UI_SPINNER[spin_frame & 3]);
+        else
+            snprintf(roll_line, sizeof(roll_line),
+                     "Roll: *%2d   Spin: %s",
+                     roll, UI_SPINNER[spin_frame & 3]);
+        fkt_ui_body_puts(roll_line);
+    }
     if (quantum_flash || locked)
-        printf("\n  Quantum Resistance Reached! \xf0\x9f\x94\xa5\n");
-    printf("\n");
-    fputs(ui_green(), stdout);
+        fkt_ui_body_puts("*** QUANTUM RESISTANCE REACHED! ***");
+    fkt_ui_body_puts("");
     if (pct < 100)
-        printf("  [Enter] Finish & generate %d-word seed  (Need more chaos...)\n",
-               num_words);
+        fkt_ui_body_printf("[Enter] Finish & generate %d-word seed  (Need more chaos...)\n",
+                       num_words);
     else
-        printf("  [Enter] Finish & generate %d-word seed\n", num_words);
-    if (locked)
-        printf("  [Space] locked — quantum saturation reached\n  [Esc] Cancel\n\n");
-    else
-        printf("  [Space] Add entropy     [Esc] Cancel\n\n");
-    printf("  Tip: This is more secure than most hardware wallets if you do it right.\n");
+        fkt_ui_body_printf("[Enter] Finish & generate %d-word seed\n", num_words);
+    if (locked) {
+        fkt_ui_body_puts("[Space] locked — quantum saturation reached");
+        fkt_ui_body_puts("[Esc] Cancel");
+    } else {
+        fkt_ui_body_puts("[Space] Add entropy     [Esc] Cancel");
+    }
+    fkt_ui_body_puts("");
+    fkt_ui_body_puts("Tip: This is more secure than most hardware wallets if you do it right.");
     fkt_ui_pin_footer("\342\227\213 not loaded", "\342\227\213 not loaded");
     ui_hide_cursor();
+    g_entropy_pct = pct;
+    g_entropy_roll = roll;
+    g_entropy_spin = spin_frame;
+    g_entropy_animate = animate;
+    g_entropy_locked = locked;
+    g_entropy_quantum = quantum_flash;
+    g_entropy_num_words = num_words;
+    g_ui_redraw_cb = ui_redraw_entropy_screen;
 }
 
-static unsigned int g_entropy_pool = 0;
-static int g_entropy_pool_bits = 0;
+static fkt_sha256_ctx g_entropy_sha;
+static int g_entropy_strokes;
 
 static void ui_entropy_reset(void) {
-    g_entropy_pool = 0;
-    g_entropy_pool_bits = 0;
+    fkt_sha256_init(&g_entropy_sha);
+    g_entropy_strokes = 0;
 }
 
-static void ui_entropy_mix(uint8_t *ent, int *len, unsigned int val, int bits,
-                           int *pct, int bump) {
+static void ui_entropy_feed(int ch, int roll, int spin, int *pct, int bump) {
+    uint8_t block[12];
+    uint32_t t;
 
-    g_entropy_pool = (g_entropy_pool << bits) | (val & ((1u << bits) - 1));
-    g_entropy_pool_bits += bits;
-    while (g_entropy_pool_bits >= 8 && *len < 32) {
-        g_entropy_pool_bits -= 8;
-        ent[(*len)++] = (uint8_t)((g_entropy_pool >> g_entropy_pool_bits) & 0xFF);
-        g_entropy_pool &= (1u << g_entropy_pool_bits) - 1;
-    }
+    t = (uint32_t)time(NULL);
+    block[0] = (uint8_t)ch;
+    block[1] = (uint8_t)(roll & 0xFF);
+    block[2] = (uint8_t)(spin & 0xFF);
+    block[3] = (uint8_t)(g_entropy_strokes & 0xFF);
+    block[4] = (uint8_t)((g_entropy_strokes >> 8) & 0xFF);
+    block[5] = (uint8_t)((g_entropy_strokes >> 16) & 0xFF);
+    memcpy(block + 6, &t, sizeof(t));
+    fkt_sha256_update(&g_entropy_sha, block, sizeof(block));
+    g_entropy_strokes++;
+
     if (bump > 0 && *pct < ENTROPY_MEME_PCT) {
         *pct += bump;
         if (*pct > ENTROPY_MEME_PCT)
@@ -606,22 +999,202 @@ static void ui_entropy_mix(uint8_t *ent, int *len, unsigned int val, int bits,
     }
 }
 
-static void ui_entropy_finalize(uint8_t *ent, int *len, int target_len,
-                              unsigned int salt) {
-    int i;
+static void ui_entropy_finalize(uint8_t *ent, int target_len) {
+    uint8_t digest[32];
 
-    while (*len < target_len) {
-        int pos = *len;
-        ent[pos] = (uint8_t)((salt >> ((pos % 4) * 8)) ^ rand() ^ pos);
-        (*len)++;
-        salt = salt * 1664525u + 1013904223u;
-    }
-    for (i = 0; i < target_len; i++)
-        ent[i] ^= (uint8_t)(rand() & 0xFF);
+    fkt_sha256_final(&g_entropy_sha, digest);
+    memcpy(ent, digest, (size_t)target_len);
+    fkt_memzero(digest, sizeof(digest));
+    ui_entropy_reset();
 }
 
-int fkt_ui_read_line(char *out, size_t out_len, int reject_empty) {
-    char line[512];
+static int ui_wait_any_key(void) {
+    int ch;
+
+    ch = fkt_tty_read_key_once();
+    if (ch < 0)
+        return 0;
+    if (ch == 27)
+        return 1;
+    return 0;
+}
+
+static void help_emit_line(FILE *fp, int use_ui, const char *line) {
+    if (use_ui)
+        fkt_ui_body_puts(line);
+    else
+        fprintf(fp, "%s\n", line);
+}
+
+static void help_emit_arg(FILE *fp, int use_ui, const char *name, const char *desc) {
+    char line[96];
+
+    snprintf(line, sizeof(line), "  %-16s  %s", name, desc);
+    help_emit_line(fp, use_ui, line);
+}
+
+static void fkt_emit_cli_help(FILE *fp, int use_ui) {
+    help_emit_line(fp, use_ui, "Example (all forms):");
+    help_emit_line(fp, use_ui, "  fkt  |  fkt preview <psbt>  |  fkt inspect <psbt>");
+    help_emit_line(fp, use_ui, "  fkt qr <text>  |  fkt qr --psbt <file> [--term] [--pbm f]");
+    help_emit_line(fp, use_ui, "  fkt sign <in> <out> \"mnemonic\"  |  fkt --base64 <psbt>");
+    help_emit_line(fp, use_ui, "  fkt <hex128> <path> <in> <out>");
+    help_emit_line(fp, use_ui, "  fkt --pubkey <hex128> <path>");
+    help_emit_line(fp, use_ui, "  fkt --parent-pubkey <hex> <path> <pub33> <in> <out>");
+    help_emit_line(fp, use_ui, "  fkt --help  |  fkt --version");
+    help_emit_line(fp, use_ui, "");
+    help_emit_line(fp, use_ui, "Arguments:");
+    help_emit_arg(fp, use_ui, "fkt", "Open interactive wallet");
+    help_emit_arg(fp, use_ui, "preview", "Read-only tx summary ([Q] QR)");
+    help_emit_arg(fp, use_ui, "inspect", "Same as preview");
+    help_emit_arg(fp, use_ui, "qr", "Show QR code");
+    help_emit_arg(fp, use_ui, "<text>", "Any QR payload");
+    help_emit_arg(fp, use_ui, "--psbt", "QR signed PSBT");
+    help_emit_arg(fp, use_ui, "--term", "Force terminal QR");
+    help_emit_arg(fp, use_ui, "--pbm", "Export PBM image");
+    help_emit_arg(fp, use_ui, "sign", "Sign from mnemonic ([Q] QR after)");
+    help_emit_arg(fp, use_ui, "<in>", "Input PSBT file");
+    help_emit_arg(fp, use_ui, "<out>", "Output signed PSBT");
+    help_emit_arg(fp, use_ui, "\"mnemonic\"", "Quoted seed words");
+    help_emit_arg(fp, use_ui, "--base64", "Print PSBT base64");
+    help_emit_arg(fp, use_ui, "<hex128>", "64-byte seed hex");
+    help_emit_arg(fp, use_ui, "<path>", "BIP32 derivation path");
+    help_emit_arg(fp, use_ui, "--pubkey", "Print derived pubkey");
+    help_emit_arg(fp, use_ui, "--parent-pubkey", "Advanced cosign path");
+    help_emit_arg(fp, use_ui, "<pub33>", "Parent pubkey hex");
+    help_emit_arg(fp, use_ui, "<psbt>", "File or pasted base64");
+    help_emit_arg(fp, use_ui, "--help, -h", "Print this help");
+    help_emit_arg(fp, use_ui, "--version", "Print version string");
+    help_emit_arg(fp, use_ui, "[Q]", "Show QR on preview/sign screens");
+}
+
+void fkt_cli_print_help(FILE *fp) {
+    if (!fp)
+        fp = stdout;
+    fprintf(fp, "FKT — Floppy Kit Tool (shell reference)\n\n");
+    fkt_emit_cli_help(fp, 0);
+}
+
+void fkt_cli_print_version(FILE *fp) {
+    if (!fp)
+        fp = stdout;
+    fprintf(fp, "fkt %s\n", FKT_VERSION_STRING);
+}
+
+int fkt_cli_sign_success_interact(const char *out_psbt) {
+    char line[16];
+
+    if (!out_psbt || out_psbt[0] == '\0')
+        return 0;
+
+    fkt_ui_term_init();
+    for (;;) {
+        fkt_ui_clear_screen();
+        ui_draw_top_banner();
+        fkt_ui_draw_subtitle("SIGN OK");
+        fkt_ui_body_printf("Signed PSBT: %s\n", out_psbt);
+        fkt_ui_body_puts("");
+        fkt_ui_body_puts("ZEROED ALL KEY MATERIAL");
+        fkt_ui_body_puts("");
+        fkt_ui_body_puts("[Q] QR signed PSBT   [Enter] Exit");
+        fkt_ui_pin_session_footer();
+        if (!fkt_ui_read_line(line, sizeof(line), 0))
+            break;
+        if (ui_choice_is_qr(line)) {
+            if (fkt_ui_show_qr_psbt_file(out_psbt) != 0)
+                fkt_ui_body_puts("[!] Could not encode signed PSBT as QR.");
+            continue;
+        }
+        break;
+    }
+    fkt_ui_term_restore();
+    return 0;
+}
+
+static int ui_show_help_popup(void) {
+    fkt_ui_clear_screen();
+    ui_draw_top_banner();
+    fkt_ui_draw_subtitle("SHELL HELP");
+    fkt_emit_cli_help(stdout, 1);
+    fkt_ui_body_puts("");
+    fkt_ui_body_puts("Press any key to dismiss...");
+    fkt_ui_pin_session_footer();
+    fflush(stdout);
+    return ui_wait_any_key();
+}
+
+static int ui_is_hotkey_char(int ch) {
+    return ch == '?' || ch == '!' || ch == '#';
+}
+
+static int ui_handle_global_hotkey(const char *choice) {
+    if (!choice || choice[0] == '\0')
+        return 0;
+    if (strcmp(choice, "?") == 0) {
+        if (ui_show_help_popup())
+            return FKT_UI_HK_MENU;
+        if (g_ui_redraw_cb)
+            g_ui_redraw_cb();
+        return FKT_UI_HK_HANDLED;
+    }
+    if (strcmp(choice, "!") == 0) {
+        g_ui_debug = !g_ui_debug;
+        if (g_ui_redraw_cb)
+            g_ui_redraw_cb();
+        return FKT_UI_HK_HANDLED;
+    }
+    if (strcmp(choice, "#") == 0) {
+        fkt_ui_toggle_theme();
+        if (g_ui_redraw_cb)
+            g_ui_redraw_cb();
+        return FKT_UI_HK_HANDLED;
+    }
+    return FKT_UI_HK_NONE;
+}
+
+/* 1 = accept seed, 0 = discard/cancel */
+static int ui_generated_seed_interact(const char words[][WORD_BUF], int num_words) {
+    int ch;
+
+    ui_term_raw_on();
+    ui_draw_generated_seed_screen(words, num_words);
+
+    for (;;) {
+        ch = fkt_tty_read_key();
+        if (ch == EOF) {
+            ui_term_raw_off();
+            return 0;
+        }
+        if (ui_is_hotkey_char(ch)) {
+            char hk[2];
+
+            hk[0] = (char)ch;
+            hk[1] = '\0';
+            if (ui_handle_global_hotkey(hk)) {
+                ui_draw_generated_seed_screen(words, num_words);
+                continue;
+            }
+        }
+        if (ch == 27) {
+            ui_term_raw_off();
+            return 0;
+        }
+        if (ch == 'q' || ch == 'Q') {
+            if (fkt_ui_show_qr_seed(words, num_words) != 0)
+                fkt_ui_body_puts("[!] Could not encode seed as QR.");
+            ui_term_raw_on();
+            ui_draw_generated_seed_screen(words, num_words);
+            continue;
+        }
+        if (ch == '\n' || ch == '\r') {
+            ui_term_raw_off();
+            return 1;
+        }
+    }
+}
+
+static int ui_read_line_fgets(char *out, size_t out_len, int reject_empty) {
+    char line[FKT_PSBT_INPUT_MAX];
     size_t len;
 
     for (;;) {
@@ -632,6 +1205,13 @@ int fkt_ui_read_line(char *out, size_t out_len, int reject_empty) {
             line[len - 1] = '\0';
             len--;
         }
+        {
+            int hk = ui_handle_global_hotkey(line);
+            if (hk == FKT_UI_HK_MENU)
+                return 0;
+            if (hk == FKT_UI_HK_HANDLED)
+                continue;
+        }
         if (reject_empty && len == 0)
             continue;
         if (len >= out_len)
@@ -639,6 +1219,137 @@ int fkt_ui_read_line(char *out, size_t out_len, int reject_empty) {
         memcpy(out, line, len + 1);
         return 1;
     }
+}
+
+static int ui_read_line_interactive(char *out, size_t out_len, int reject_empty) {
+    size_t pos = 0;
+    int ch;
+
+    if (ui_apply_cbreak() != 0)
+        return ui_read_line_fgets(out, out_len, reject_empty);
+    g_term_interactive = 1;
+
+    out[0] = '\0';
+    if (!g_ui_input_hidden) {
+        ui_echo_input("", 0);
+        ui_place_cursor(g_input_row, g_input_col);
+        ui_show_cursor();
+    } else {
+        ui_hide_cursor();
+    }
+
+    for (;;) {
+        ch = fkt_tty_read_key();
+        if (ch == EOF) {
+            g_ui_input_hidden = 0;
+            fkt_ui_term_restore();
+            return 0;
+        }
+
+        if (ch == 27) {
+            g_ui_input_hidden = 0;
+            fkt_ui_term_restore();
+            if (g_ui_redraw_cb == ui_draw_main_menu) {
+                ui_draw_main_menu();
+                if (ui_apply_cbreak() != 0)
+                    return 0;
+                g_term_interactive = 1;
+                out[0] = '\0';
+                pos = 0;
+                ui_echo_input("", 0);
+                ui_place_cursor(g_input_row, g_input_col);
+                ui_show_cursor();
+                continue;
+            }
+            out[0] = '\0';
+            return 0;
+        }
+
+        if (pos == 0 && ui_is_hotkey_char(ch)) {
+            char hk[2];
+            int hres;
+
+            hk[0] = (char)ch;
+            hk[1] = '\0';
+            fkt_ui_term_restore();
+            hres = ui_handle_global_hotkey(hk);
+            if (hres == FKT_UI_HK_MENU) {
+                g_ui_input_hidden = 0;
+                out[0] = '\0';
+                return 0;
+            }
+            if (hres == FKT_UI_HK_HANDLED) {
+                out[0] = '\0';
+                pos = 0;
+                if (ui_apply_cbreak() != 0) {
+                    g_ui_input_hidden = 0;
+                    return 0;
+                }
+                g_term_interactive = 1;
+                if (!g_ui_input_hidden) {
+                    ui_echo_input("", 0);
+                    ui_place_cursor(g_input_row, g_input_col);
+                    ui_show_cursor();
+                } else {
+                    ui_hide_cursor();
+                }
+                continue;
+            }
+            if (ui_apply_cbreak() != 0)
+                return 0;
+            g_term_interactive = 1;
+        }
+
+        if (ch == '\n' || ch == '\r') {
+            if (reject_empty && pos == 0)
+                continue;
+            out[pos] = '\0';
+            if (pos > 0) {
+                int hres = ui_handle_global_hotkey(out);
+                if (hres == FKT_UI_HK_MENU) {
+                    g_ui_input_hidden = 0;
+                    fkt_ui_term_restore();
+                    out[0] = '\0';
+                    return 0;
+                }
+                if (hres == FKT_UI_HK_HANDLED) {
+                    pos = 0;
+                    out[0] = '\0';
+                    if (!g_ui_input_hidden) {
+                        ui_echo_input("", 0);
+                        ui_place_cursor(g_input_row, g_input_col);
+                    }
+                    continue;
+                }
+            }
+            g_ui_input_hidden = 0;
+            fkt_ui_term_restore();
+            return 1;
+        }
+
+        if (ch == 127 || ch == 8) {
+            if (pos > 0) {
+                pos--;
+                out[pos] = '\0';
+                if (!g_ui_input_hidden)
+                    ui_echo_input(out, pos);
+            }
+            continue;
+        }
+
+        if (ch >= 32 && ch < 127 && pos + 1 < out_len) {
+            out[pos++] = (char)ch;
+            out[pos] = '\0';
+            if (!g_ui_input_hidden)
+                ui_echo_input(out, pos);
+        }
+    }
+}
+
+int fkt_ui_read_line(char *out, size_t out_len, int reject_empty) {
+    if (g_ui_input_hidden || (g_input_row > 0 && g_input_col > 0))
+        return ui_read_line_interactive(out, out_len, reject_empty);
+    return ui_read_line_fgets(out, out_len, reject_empty);
 }
 
 int fkt_ui_prompt_path(const char *label, char *out, size_t out_len) {
@@ -665,12 +1376,10 @@ static int ui_menu_load_seed(void) {
 }
 
 static int ui_menu_load_psbt(void) {
-    char path[512];
+    char path[FKT_PSBT_INPUT_MAX];
 
-    ui_draw_load_psbt_screen();
-    if (!fkt_ui_read_line(path, sizeof(path), 1))
-        return 0;
-    if (path[0] == '\0')
+    g_psbt_load_err[0] = '\0';
+    if (!ui_prompt_load_psbt(path, sizeof(path)))
         return 0;
     strncpy(g_psbt_path, path, sizeof(g_psbt_path) - 1);
     g_psbt_path[sizeof(g_psbt_path) - 1] = '\0';
@@ -679,64 +1388,173 @@ static int ui_menu_load_psbt(void) {
 
 static int ui_menu_preview(void) {
     if (g_psbt_path[0] == '\0') {
-        ui_draw_load_psbt_screen();
-        if (!fkt_ui_read_line(g_psbt_path, sizeof(g_psbt_path), 1))
+        g_psbt_load_err[0] = '\0';
+        if (!ui_prompt_load_psbt(g_psbt_path, sizeof(g_psbt_path)))
             return 0;
     }
-    if (fkt_psbt_preview(g_psbt_path) != 0)
+    if (fkt_psbt_preview_prepare(g_psbt_path) != 0) {
+        strncpy(g_psbt_load_err, "Could not parse PSBT for preview.",
+                sizeof(g_psbt_load_err) - 1);
+        g_psbt_load_err[sizeof(g_psbt_load_err) - 1] = '\0';
+        fkt_ui_clear_screen();
+        ui_draw_top_banner();
+        fkt_ui_draw_subtitle("PREVIEW");
+        fkt_ui_body_printf("[!] %s\n", g_psbt_load_err);
+        fkt_ui_body_puts("Check path is a binary .psbt or base64 .txt sidecar.");
+        fkt_ui_body_puts("");
+        fkt_ui_body_puts("Press Enter to return...");
+        fkt_ui_pin_session_footer();
+        {
+            char dummy[8];
+            if (!fkt_ui_read_line(dummy, sizeof(dummy), 0))
+                return 0;
+        }
         return 0;
-    ui_draw_preview_wait_screen();
-    {
-        char dummy[8];
-        fkt_ui_read_line(dummy, sizeof(dummy), 0);
     }
-    return 1;
+    for (;;) {
+        char line[16];
+
+        ui_draw_preview_screen();
+        if (!fkt_ui_read_line(line, sizeof(line), 0))
+            return 0;
+        if (ui_choice_is_qr(line)) {
+            if (fkt_ui_show_qr_loaded_psbt() != 0)
+                fkt_ui_body_puts("[!] Could not encode PSBT as QR.");
+            continue;
+        }
+        return 1;
+    }
+}
+
+static int ui_wait_enter(const char *prompt) {
+    char dummy[8];
+
+    fputs(ui_green(), stdout);
+    if (prompt && prompt[0])
+        printf("\n  %s\n", prompt);
+    else
+        printf("\n  Press Enter to return...\n");
+    fkt_ui_pin_session_footer();
+    return fkt_ui_read_line(dummy, sizeof(dummy), 0);
+}
+
+static void ui_draw_sign_notice(const char *headline, const char *detail) {
+    fkt_ui_clear_screen();
+    ui_draw_top_banner();
+    fkt_ui_draw_subtitle("SIGN");
+    if (headline && headline[0])
+        fkt_ui_body_puts(headline);
+    if (detail && detail[0])
+        fkt_ui_body_puts(detail);
 }
 
 static int ui_menu_sign(void) {
     char out_path[512];
     char line[512];
+    char detail[384];
+    const char *err;
 
-    if (!g_seed_loaded)
+    if (!g_seed_loaded) {
+        ui_draw_sign_notice("[!] Load a seed first (option 1).", "");
+        if (!ui_wait_enter("Press Enter to return..."))
+            return 0;
         return 0;
+    }
     if (g_psbt_path[0] == '\0') {
-        ui_draw_load_psbt_screen();
-        if (!fkt_ui_read_line(g_psbt_path, sizeof(g_psbt_path), 1))
+        g_psbt_load_err[0] = '\0';
+        if (!ui_prompt_load_psbt(g_psbt_path, sizeof(g_psbt_path)))
             return 0;
     }
 
     ui_draw_sign_screen(0);
-    if (!fkt_ui_read_line(line, sizeof(line), 0))
+    if (!fkt_ui_read_line(line, sizeof(line), 0)) {
+        ui_draw_sign_notice("Signing cancelled.", "");
+        if (!ui_wait_enter("Press Enter to return..."))
+            return 0;
         return 0;
+    }
     if (line[0] == '\0')
         strcpy(out_path, SIGN_DEFAULT_OUT);
     else
         strncpy(out_path, line, sizeof(out_path) - 1);
     out_path[sizeof(out_path) - 1] = '\0';
 
-    if (fkt_sign_psbt_from_words(g_psbt_path, out_path,
-                                g_session_words, g_session_num_words) != 0)
+    if (fkt_psbt_preview_prepare(g_psbt_path) != 0) {
+        ui_draw_sign_notice("[!] Could not reload PSBT before signing.",
+                            "Reload via option 2 (file path or pasted base64).");
+        if (!ui_wait_enter("Press Enter to return..."))
+            return 0;
         return 0;
-
-    ui_draw_sign_screen(1);
-    {
-        char dummy[8];
-        fkt_ui_read_line(dummy, sizeof(dummy), 0);
     }
-    return 1;
+
+    fkt_ui_clear_screen();
+    fkt_psbt_preview_render();
+    if (fkt_confirm_before_sign_ui() != 0) {
+        err = fkt_last_error_get();
+        if (!err || err[0] == '\0')
+            err = "Signing cancelled.";
+        ui_draw_sign_notice("[!] Signing did not proceed.", err);
+        if (!ui_wait_enter("Press Enter to return..."))
+            return 0;
+        return 0;
+    }
+    fkt_confirm_fingerprint_capture();
+
+    strncpy(g_sign_out_path, out_path, sizeof(g_sign_out_path) - 1);
+    g_sign_out_path[sizeof(g_sign_out_path) - 1] = '\0';
+
+    if (fkt_sign_psbt_from_words(g_psbt_path, out_path,
+                                g_session_words, g_session_num_words) != 0) {
+        err = fkt_last_error_get();
+        if (!err || err[0] == '\0')
+            err = "Signing failed.";
+        snprintf(detail, sizeof(detail),
+                 "%s\n  Enter a writable .psbt filename, or press Enter\n"
+                 "  at the prompt to use default: %s",
+                 err, SIGN_DEFAULT_OUT);
+        ui_draw_sign_notice("[!] Signing did not complete.", detail);
+        if (!ui_wait_enter("Press Enter to return..."))
+            return 0;
+        return 0;
+    }
+
+    for (;;) {
+        char line[16];
+
+        ui_draw_sign_screen(1);
+        if (!fkt_ui_read_line(line, sizeof(line), 0))
+            return 0;
+        if (ui_choice_is_qr(line)) {
+            if (fkt_ui_show_qr_psbt_file(g_sign_out_path) != 0)
+                fkt_ui_body_puts("[!] Could not encode signed PSBT as QR.");
+            continue;
+        }
+        return 1;
+    }
 }
 
 static int ui_menu_show_seed(void) {
     char line[32];
+    char words[MAX_WORDS][WORD_BUF];
+    int num_words;
 
-    ui_draw_show_seed_screen();
-    if (!fkt_ui_read_line(line, sizeof(line), 0))
-        return 0;
-    if (line[0] == 'v' || line[0] == 'V') {
-        if (g_seed_loaded)
-            return fkt_verify_seed(g_session_words, g_session_num_words);
+    for (;;) {
+        ui_draw_show_seed_screen();
+        if (!fkt_ui_read_line(line, sizeof(line), 0))
+            return 0;
+        if (ui_choice_is_qr(line)) {
+            ui_fill_show_words(words, &num_words);
+            if (fkt_ui_show_qr_seed(words, num_words) != 0)
+                fkt_ui_body_puts("[!] Could not encode seed as QR.");
+            continue;
+        }
+        if (ui_choice_is_verify(line)) {
+            if (g_seed_loaded)
+                return fkt_verify_seed(g_session_words, g_session_num_words);
+            continue;
+        }
+        return 1;
     }
-    return 1;
 }
 
 static int ui_menu_new_wallet(void) {
@@ -744,7 +1562,6 @@ static int ui_menu_new_wallet(void) {
     char generated[MAX_WORDS][WORD_BUF];
     int target_words = 0;
     int ent_bytes = 0;
-    int entropy_len = 0;
     int pct = 0;
     int roll = 1;
     int spin_frame = 0;
@@ -758,7 +1575,6 @@ static int ui_menu_new_wallet(void) {
         return 0;
     ent_bytes = (target_words == 12) ? 16 : 32;
 
-    srand((unsigned)time(NULL));
     memset(entropy, 0, sizeof(entropy));
     ui_entropy_reset();
     ui_term_raw_on();
@@ -766,10 +1582,21 @@ static int ui_menu_new_wallet(void) {
                            target_words);
 
     for (;;) {
-        ch = getchar();
+        ch = fkt_tty_read_key();
         if (ch == EOF) {
             ui_term_raw_off();
             return 0;
+        }
+        if (ui_is_hotkey_char(ch)) {
+            char hk[2];
+
+            hk[0] = (char)ch;
+            hk[1] = '\0';
+            if (ui_handle_global_hotkey(hk)) {
+                ui_draw_entropy_screen(pct, roll, spin_frame, 0, locked,
+                                       quantum_flash, target_words);
+                continue;
+            }
         }
         if (ch == 27) {
             ui_term_raw_off();
@@ -783,10 +1610,9 @@ static int ui_menu_new_wallet(void) {
         if (locked)
             continue;
         if (ch == ' ') {
-            ui_entropy_mix(entropy, &entropy_len,
-                           (unsigned int)(rand() ^ roll ^ spin_frame), 8, &pct, 5);
-            roll = (rand() % 20) + 1;
             spin_frame++;
+            roll = (spin_frame % 20) + 1;
+            ui_entropy_feed(' ', roll, spin_frame, &pct, 5);
             if (pct >= ENTROPY_MEME_PCT) {
                 pct = ENTROPY_MEME_PCT;
                 locked = 1;
@@ -797,22 +1623,18 @@ static int ui_menu_new_wallet(void) {
             quantum_flash = 0;
             continue;
         }
-        ui_entropy_mix(entropy, &entropy_len, (unsigned int)ch, 5, &pct, 0);
+        ui_entropy_feed(ch, roll, spin_frame, &pct, 0);
     }
 
     ui_term_raw_off();
-    ui_entropy_finalize(entropy, &entropy_len, ent_bytes, (unsigned int)time(NULL));
+    ui_entropy_finalize(entropy, ent_bytes);
     if (fkt_bip39_from_entropy(entropy, ent_bytes, generated, &num_words) != 0)
         return 0;
 
-    ui_draw_generated_seed_screen(generated, num_words);
-    {
-        char accept[16];
-        if (!fkt_ui_read_line(accept, sizeof(accept), 0)) {
-            fkt_memzero(entropy, sizeof(entropy));
-            fkt_memzero(generated, sizeof(generated));
-            return 0;
-        }
+    if (!ui_generated_seed_interact(generated, num_words)) {
+        fkt_memzero(entropy, sizeof(entropy));
+        fkt_memzero(generated, sizeof(generated));
+        return 0;
     }
 
     for (i = 0; i < num_words; i++) {
@@ -826,47 +1648,26 @@ static int ui_menu_new_wallet(void) {
     return 1;
 }
 
-static int ui_handle_global_hotkey(const char *choice) {
-    if (!choice || choice[0] == '\0')
-        return 0;
-    if (strcmp(choice, "?") == 0) {
-        fputs(ui_green(), stdout);
-        fputs("\n  FKT Help: 1=seed 2=PSBT 3=preview 4=sign 5=show 6=new 0=exit\n",
-              stdout);
-        return 1;
-    }
-    if (strcmp(choice, "d") == 0 || strcmp(choice, "D") == 0) {
-        fputs(ui_green(), stdout);
-        printf("\n  [Debug] Seed %s | PSBT %s | theme %s\n",
-               ui_seed_status(), ui_psbt_status(),
-               g_ui_theme_bright ? "bright" : "dim");
-        return 1;
-    }
-    if (strcmp(choice, "t") == 0 || strcmp(choice, "T") == 0) {
-        fkt_ui_toggle_theme();
-        return 1;
-    }
-    return 0;
-}
-
 int fkt_ui_main_menu(void) {
     char choice[32];
 
     fkt_ui_term_init();
+    fkt_confirm_set_ui_mode(1);
     g_psbt_path[0] = '\0';
     g_seed_loaded = 0;
     g_session_num_words = 0;
 
     for (;;) {
         ui_draw_main_menu();
-        if (!fkt_ui_read_line(choice, sizeof(choice), 1))
+        if (!fkt_ui_read_line(choice, sizeof(choice), 1)) {
+            fkt_ui_term_restore();
             return 0;
+        }
 
-        if (ui_handle_global_hotkey(choice))
-            continue;
-
-        if (strcmp(choice, "0") == 0 || strcmp(choice, "q") == 0)
+        if (strcmp(choice, "0") == 0 || strcmp(choice, "q") == 0) {
+            fkt_ui_term_restore();
             return 0;
+        }
         if (strcmp(choice, "1") == 0)
             ui_menu_load_seed();
         else if (strcmp(choice, "2") == 0)
@@ -880,8 +1681,8 @@ int fkt_ui_main_menu(void) {
         else if (strcmp(choice, "6") == 0)
             ui_menu_new_wallet();
         else {
-            fputs(ui_green(), stdout);
-            fputs("\n  Invalid option.\n", stdout);
+            fkt_ui_body_puts("");
+            fkt_ui_body_puts("Invalid option.");
         }
     }
 }

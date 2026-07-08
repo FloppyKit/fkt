@@ -4,3 +4,11 @@
 secp256k1-build/
 fs/
 broadcast-ready-today.txt
+fktsigner
+fktsigner.stripped
+fkt
+test_parse
+test_qr
+psbt_parse_test
+poppy
+poppy.qr.pbm

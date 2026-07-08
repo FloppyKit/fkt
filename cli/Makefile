@@ -1,9 +1,15 @@
 CC = gcc
 SECP_DIR = ../secp256k1-build
-CFLAGS = -std=c89 -Wall -Wextra -I. -I$(SECP_DIR)/include -DENABLE_MODULE_SCHNORRSIG -DENABLE_MODULE_EXTRAKEYS
+CFLAGS = -std=c89 -Wall -Wextra -I. -I$(SECP_DIR)/include -DFKT_LINUX=1 -DENABLE_MODULE_SCHNORRSIG -DENABLE_MODULE_EXTRAKEYS
+ifdef WARM
+CFLAGS += -DFKT_WARM_WALLET=1
+endif
 SECP_LIB = $(SECP_DIR)/libsecp256k1.a
 
 OBJS = main.o \
+       fkt_tty.o \
+       fkt_screen.o \
+       fkt_file.o \
        fkt_ui.o \
        fkt_seed.o \
        fkt_bip39.o \
@@ -19,16 +25,27 @@ OBJS = main.o \
        fkt_secp256k1.o \
        fkt_psbt.o \
        fkt_preview.o \
+       fkt_confirm.o \
        fkt_finalizer.o \
        fkt_memzero.o \
        fkt_sighash.o \
-       fkt_signer.o
+       fkt_signer.o \
+       fkt_qr.o \
+       fkt_qr_vga.o \
+       fkt_qrgen_wrap.o \
+       fkt_qrgen.o
 
-all: fktsigner verify_ecdsa
+all: fktsigner fkt verify_ecdsa
+
+warm:
+	$(MAKE) WARM=1 fktsigner fkt
+
+fkt: fktsigner
+	ln -sf fktsigner fkt
 
 FUZZ_OBJS = fkt_seed.o fkt_bip39.o fkt_error.o fkt_util.o fkt_sha256.o fkt_sha512.o \
             fkt_hmac.o fkt_pbkdf2.o fkt_ripemd160.o fkt_hash160.o fkt_bip32.o \
-            fkt_secp256k1.o fkt_psbt.o fkt_preview.o fkt_finalizer.o \
+            fkt_secp256k1.o fkt_psbt.o fkt_preview.o fkt_confirm.o fkt_finalizer.o \
             fkt_memzero.o fkt_sighash.o fkt_signer.o
 
 FUZZ_CC := $(shell command -v clang 2>/dev/null)
@@ -41,7 +58,10 @@ else
   FUZZ_DEFS =
 endif
 
-.PHONY: test-sparrow sparrow-base64 clean fuzz fuzz-corpus
+PARSE_TEST_OBJS = fkt_psbt.o fkt_error.o fkt_sha256.o fkt_sha512.o fkt_util.o \
+                  fkt_memzero.o
+
+.PHONY: test-sparrow test-qr test-parse sparrow-base64 clean fuzz fuzz-corpus warm
 
 $(SECP_LIB):
 	cd $(SECP_DIR) && gcc -std=c99 -O2 -Iinclude -Isrc -DENABLE_MODULE_SCHNORRSIG -DENABLE_MODULE_EXTRAKEYS -c src/secp256k1.c -o libsecp256k1_main.o
@@ -65,6 +85,32 @@ sparrow-base64: fktsigner
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
+# Nayuki QR encoder uses C99 (bool); isolated to these translation units.
+fkt_qrgen.o: fkt_qrgen.c fkt_qrgen.h
+	$(CC) -std=c99 -Wall -Wextra -I. -c -o $@ fkt_qrgen.c
+
+fkt_qrgen_wrap.o: fkt_qrgen_wrap.c fkt_qrgen_wrap.h fkt_qrgen.h
+	$(CC) -std=c99 -Wall -Wextra -I. -c -o $@ fkt_qrgen_wrap.c
+
+fkt_qr_vga.o: fkt_qr_vga.c fkt_qr_vga.h fkt_qr.h
+	$(CC) -std=c99 -Wall -Wextra -I. -DFKT_QR_VGA_FB -c -o $@ fkt_qr_vga.c
+
+test_qr: tests/test_qr.c fkt_qr.o fkt_qr_vga.o fkt_qrgen_wrap.o fkt_qrgen.o fkt_memzero.o
+	$(CC) $(CFLAGS) -o $@ tests/test_qr.c fkt_qr.o fkt_qr_vga.o fkt_qrgen_wrap.o fkt_qrgen.o fkt_memzero.o
+
+test-qr: test_qr
+	./test_qr
+
+test_parse: tests/test_parse.c $(PARSE_TEST_OBJS)
+	$(CC) $(CFLAGS) -o test_parse tests/test_parse.c $(PARSE_TEST_OBJS)
+
+psbt_parse_test: tests/psbt_parse_test.c $(PARSE_TEST_OBJS)
+	$(CC) $(CFLAGS) -o psbt_parse_test tests/psbt_parse_test.c $(PARSE_TEST_OBJS)
+
+test-parse: test_parse psbt_parse_test
+	./test_parse
+	python3 tests/run_parser_tests.py --binary ./psbt_parse_test
+
 fkt_fuzz: fkt_fuzz.c $(FUZZ_OBJS) $(SECP_LIB)
 	$(FUZZ_CC) -std=c89 -Wall -Wextra -g $(FUZZ_DEFS) $(FUZZ_SAN) \
 		-I. -I$(SECP_DIR)/include \
@@ -78,4 +124,4 @@ fuzz: fkt_fuzz fuzz-corpus
 	./fkt_fuzz -max_len=4096 -runs=10000 corpus/
 
 clean:
-	rm -f *.o fktsigner verify_ecdsa fkt_fuzz
+	rm -f *.o fktsigner verify_ecdsa fkt_fuzz test_parse psbt_parse_test test_qr

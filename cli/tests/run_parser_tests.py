@@ -5,9 +5,9 @@ Walks all .psbt files in tests/golden-51/unsigned/ and runs
 a small parse‑only test binary against each one.
 
 Usage:
-    python3 tests/run_parser_tests.py [--binary PATH] [--verbose | -v] [--preview | -p]
+    python3 tests/run_parser_tests.py [--binary PATH] [--verbose | -v]
 
-The test binary (psbt_parse_test) must be compiled separately.
+The test binary (psbt_parse_test) must be compiled via ``make test-parse``.
 See tests/psbt_parse_test.c for the source.
 """
 
@@ -19,10 +19,23 @@ from pathlib import Path
 
 UNSIGNED_DIR = "tests/golden-51/unsigned"
 
-def run_test(binary_path, filepath, preview=False, verbose=False):
+# Known-invalid corpus entries (sighash variants, conflicting UTXO, mixed deferred).
+EXPECTED_FAIL = {
+    "mixed_p2sh_p2wpkh_p2tr_2in_2out.psbt",
+    "mixed_p2wpkh_p2tr_2in_2out.psbt",
+    "mixed_p2wsh_p2tr_2in_2out.psbt",
+    "p2tr_keypath_all_1in_2out.psbt",
+    "p2tr_keypath_all_acp_1in_2out.psbt",
+    "p2tr_keypath_none_1in_2out.psbt",
+    "p2tr_keypath_single_1in_2out.psbt",
+    "p2wpkh_all_acp_1in_2out.psbt",
+
+    "p2wpkh_none_1in_2out.psbt",
+    "p2wpkh_single_1in_2out.psbt",
+}
+
+def run_test(binary_path, filepath, verbose=False):
     cmd = [binary_path, str(filepath)]
-    if preview:
-        cmd.append("--preview")
 
     try:
         result = subprocess.run(
@@ -39,11 +52,7 @@ def run_test(binary_path, filepath, preview=False, verbose=False):
         return ("ERROR", f"unexpected exception: {e}", None)
 
     if result.returncode == 0:
-        preview_output = None
-        if preview and result.stdout:
-            # Show the full preview output
-            preview_output = result.stdout.strip()
-        return ("PASS", "", preview_output)
+        return ("PASS", "", None)
 
     if result.returncode == 1:
         msg = result.stderr.strip()
@@ -61,8 +70,6 @@ def main():
                         help="path to the psbt_parse_test binary (default: ./psbt_parse_test)")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="on failure, print full parser stderr and stdout")
-    parser.add_argument("-p", "--preview", action="store_true",
-                        help="on PASS, show the full PSBT preview output")
     args = parser.parse_args()
 
     unsigned_path = Path(UNSIGNED_DIR)
@@ -76,24 +83,24 @@ def main():
         sys.exit(1)
 
     stats = {"PASS": 0, "FAIL": 0, "ERROR": 0}
+    unexpected = 0
     longest_name = max(len(str(f.relative_to(unsigned_path))) for f in psbt_files)
 
     for f in psbt_files:
         rel_path = f.relative_to(unsigned_path)
-        status, msg, preview_lines = run_test(args.binary, f,
-                                              preview=args.preview,
-                                              verbose=args.verbose)
+        rel_name = str(rel_path)
+        status, msg, _preview_lines = run_test(args.binary, f,
+                                               verbose=args.verbose)
 
         line = f"{status:<6} {rel_path}"
         if status != "PASS" and msg:
             line += f"  -- {msg}"
+        if status == "FAIL" and rel_name not in EXPECTED_FAIL:
+            unexpected += 1
+        if status == "PASS" and rel_name in EXPECTED_FAIL:
+            unexpected += 1
+            line += "  -- unexpected PASS"
         print(line)
-
-        if status == "PASS" and preview_lines:
-            print("    --- preview ---")
-            for pline in preview_lines.split('\n'):
-                print(f"    {pline}")
-            print("    ---------------")
 
         if args.verbose and status != "PASS":
             verbose_cmd = [args.binary, str(f)]
@@ -111,6 +118,9 @@ def main():
 
     total = sum(stats.values())
     print(f"\nPASS={stats['PASS']}  FAIL={stats['FAIL']}  ERROR={stats['ERROR']}  TOTAL={total}")
+    if stats["ERROR"] > 0 or unexpected > 0:
+        print(f"Unexpected results: {unexpected}  (expected FAIL={len(EXPECTED_FAIL)})")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

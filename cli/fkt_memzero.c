@@ -60,8 +60,11 @@ void fkt_memzero_wipe_all(void) {
     g_b64_len = 0;
 }
 
+extern void fkt_ui_term_restore(void);
+
 static void fkt_sigint_handler(int sig) {
     (void)sig;
+    fkt_ui_term_restore();
     fkt_memzero_wipe_all();
     fprintf(stderr, "\nSIGINT — zeroed all key material.\n");
     _exit(130);

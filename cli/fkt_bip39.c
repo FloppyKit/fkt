@@ -2,6 +2,8 @@
 #include "fkt_bip39.h"
 #include "fkt_sha256.h"
 #include <string.h>
+#include <ctype.h>
+#include <stdlib.h>
 
 static const char *const fkt_bip39_wordlist[2048] = {
     "abandon",
@@ -2068,6 +2070,143 @@ int fkt_bip39_word_index(const char *word) {
 
 int fkt_bip39_valid_word(const char *word) {
     return fkt_bip39_word_index(word) >= 0;
+}
+
+static int fkt_bip39_all_digits(const char *s) {
+    if (!s || !s[0])
+        return 0;
+    while (*s) {
+        if (!isdigit((unsigned char)*s))
+            return 0;
+        s++;
+    }
+    return 1;
+}
+
+static void fkt_bip39_lowercase_copy(const char *src, char *dst, size_t dst_len) {
+    size_t i;
+    size_t n = src ? strlen(src) : 0;
+
+    if (dst_len == 0)
+        return;
+    if (n >= dst_len)
+        n = dst_len - 1;
+    for (i = 0; i < n; i++)
+        dst[i] = (char)tolower((unsigned char)src[i]);
+    dst[n] = '\0';
+}
+
+int fkt_bip39_resolve_token(const char *token, char out_word[FKT_BIP39_WORD_BUF]) {
+    char lower[FKT_BIP39_WORD_BUF];
+    size_t len;
+    int i;
+    int matches;
+    int match_idx;
+    long n;
+
+    if (!token || !token[0] || !out_word)
+        return 0;
+
+    /* BIP39 wordlist index (1..2048), as used on some hardware wallets. */
+    if (fkt_bip39_all_digits(token)) {
+        n = strtol(token, NULL, 10);
+        if (n < 1 || n > 2048)
+            return 0;
+        strncpy(out_word, fkt_bip39_word_at((int)n - 1), FKT_BIP39_WORD_BUF - 1);
+        out_word[FKT_BIP39_WORD_BUF - 1] = '\0';
+        return 1;
+    }
+
+    fkt_bip39_lowercase_copy(token, lower, sizeof(lower));
+
+    if (fkt_bip39_word_index(lower) >= 0) {
+        strncpy(out_word, lower, FKT_BIP39_WORD_BUF - 1);
+        out_word[FKT_BIP39_WORD_BUF - 1] = '\0';
+        return 1;
+    }
+
+    len = strlen(lower);
+    if (len < 1 || len > 4)
+        return 0;
+
+    matches = 0;
+    match_idx = -1;
+    for (i = 0; i < 2048; i++) {
+        const char *w = fkt_bip39_wordlist[i];
+        if (strncmp(w, lower, len) == 0) {
+            matches++;
+            match_idx = i;
+            if (matches > 1)
+                return 0;
+        }
+    }
+    if (matches != 1)
+        return 0;
+
+    strncpy(out_word, fkt_bip39_word_at(match_idx), FKT_BIP39_WORD_BUF - 1);
+    out_word[FKT_BIP39_WORD_BUF - 1] = '\0';
+    return 1;
+}
+
+const char *fkt_bip39_word_at(int index) {
+    if (index < 0 || index > 2047)
+        return "";
+    return fkt_bip39_wordlist[index];
+}
+
+static int read_11bits(const uint8_t *bits, int bit_off) {
+    int val = 0;
+    int i;
+
+    for (i = 0; i < 11; i++) {
+        int bit = bit_off + i;
+        int b = (bits[bit >> 3] >> (7 - (bit & 7))) & 1;
+        val = (val << 1) | b;
+    }
+    return val;
+}
+
+int fkt_bip39_from_entropy(const uint8_t *ent, int ent_len,
+                           char words[][FKT_BIP39_WORD_BUF], int *num_words) {
+    uint8_t bits[33];
+    uint8_t hash[32];
+    int nwords;
+    int ent_bits;
+    int cs_bits;
+    int i;
+
+    if (!ent || !words || !num_words)
+        return -1;
+    if (ent_len == 16) {
+        nwords = 12;
+        ent_bits = 128;
+    } else if (ent_len == 32) {
+        nwords = 24;
+        ent_bits = 256;
+    } else {
+        return -1;
+    }
+
+    cs_bits = nwords / 3;
+    memset(bits, 0, sizeof(bits));
+    memcpy(bits, ent, (size_t)ent_len);
+    fkt_sha256(ent, (size_t)ent_len, hash);
+    for (i = 0; i < cs_bits; i++) {
+        int cs_val = (hash[0] >> (7 - i)) & 1;
+        int byte = (ent_bits + i) >> 3;
+        int shift = 7 - ((ent_bits + i) & 7);
+        if (cs_val)
+            bits[byte] |= (uint8_t)(1u << shift);
+    }
+
+    for (i = 0; i < nwords; i++) {
+        int idx = read_11bits(bits, i * 11);
+        const char *w = fkt_bip39_word_at(idx);
+        strncpy(words[i], w, FKT_BIP39_WORD_BUF - 1);
+        words[i][FKT_BIP39_WORD_BUF - 1] = '\0';
+    }
+    *num_words = nwords;
+    return 0;
 }
 
 static void append_bits(uint8_t *bits, int *bit_len, unsigned val, int nbits) {
