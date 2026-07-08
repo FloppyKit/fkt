@@ -1,0 +1,39 @@
+FKT DOS BUILD — TEST STATUS (PR3)
+==================================
+Branch: cli/pr3-dos-floppy
+Last updated: 2026-07-08
+
+VERIFIED (automated / dev host)
+-------------------------------
+[PASS] make -f Makefile.dos          -> FKTSIGN.EXE (~414 KB)
+[PASS] check_floppy_size.sh            -> within 1.20 MiB EXE budget
+[PASS] dosbox_smoke.sh FKTSIGN.EXE     -> prints "fkt 0.1.0-dev" (Linux/X280)
+[PASS] make test-sparrow (Linux dev)   -> 13/13 (signing core unchanged)
+
+NEEDS TESTING (manual — start here tomorrow)
+--------------------------------------------
+[ ] Mac M4: clone branch, DJGPP osx tarball, arch -x86_64 make -f Makefile.dos
+[ ] Mac: dosbox-x (not dosbox) + CWSDPMI.EXE beside FKTSIGN.EXE in ~/fkt-dos-test/
+[ ] Interactive menu: seed load, PSBT load, preview, confirm
+[ ] Sign fixture PSBT with TEST seed only; verify in Sparrow
+[ ] VGA QR display after sign (DOSBox-X window, any key to return)
+[ ] Real hardware: 486 + FreeDOS + floppy (FKTSIGN.EXE + CWSDPMI.EXE)
+
+KNOWN GOTCHAS
+-------------
+- DOS 8.3: use FKTSIGN.EXE (FKTSIGNER.EXE = illegal command)
+- DJGPP stub requires CWSDPMI.EXE in same directory
+- Mount full path in DOSBox (no ~); dir before run to confirm files on C:
+- Mac Homebrew: brew install dosbox-x (command is dosbox-x)
+- M4 build: Rosetta + arch -x86_64 for i586-pc-msdosdjgpp-gcc
+- SSH to X280: DISPLAY=:0 needs xhost +local: or run DOSBox locally on laptop
+
+QUICK SMOKE (Linux)
+-------------------
+  scripts/bootstrap_djgpp.sh
+  cd cli && make -f Makefile.dos
+  ../scripts/dosbox_smoke.sh FKTSIGN.EXE
+
+QUICK RUN (Mac, after build + CWSDPMI in ~/fkt-dos-test/)
+----------------------------------------------------------
+  dosbox-x -c "mount c /Users/USER/fkt-dos-test" -c "c:" -c "dir" -c "FKTSIGN.EXE"

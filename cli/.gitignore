@@ -2,6 +2,7 @@
 *.b64
 *.txt
 !docs/DOS_README.TXT
+!docs/DOS_TEST_STATUS.txt
 dos-obj/
 FKTSIGN.EXE
 FKTSIGNER.EXE
