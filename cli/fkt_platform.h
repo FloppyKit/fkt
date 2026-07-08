@@ -11,6 +11,15 @@
 #define FKT_PLATFORM_LINUX 1
 #endif
 
+/* Build profile (set by Makefile) */
+#if defined(FKT_DEV_HARNESS) && FKT_DEV_HARNESS
+#define FKT_BUILD_DEV_HARNESS 1
+#endif
+
+#if defined(FKT_NO_FINALIZER) && FKT_NO_FINALIZER
+#define FKT_BUILD_NO_FINALIZER 1
+#endif
+
 /* TTY */
 int  fkt_tty_init(void);
 void fkt_tty_restore(void);

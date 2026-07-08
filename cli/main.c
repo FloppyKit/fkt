@@ -11,6 +11,7 @@
 #include "fkt_memzero.h"
 #include "fkt_qr.h"
 #include "fkt_version.h"
+#include "fkt_platform.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -24,8 +25,11 @@ static int arg_is_version(const char *s) {
 }
 
 static void print_usage_brief(const char *prog) {
-    fprintf(stderr, "Usage: %s [--help | --version | inspect <psbt> | sign ... | qr ...]\n",
-            prog);
+    fprintf(stderr, "Usage: %s [--help | --version | inspect <psbt> | qr ...]\n", prog);
+    fprintf(stderr, "       %s                    (interactive menu)\n", prog);
+#if FKT_BUILD_DEV_HARNESS
+    fprintf(stderr, "       Dev: sign <in> <out> \"mnemonic\" | --base64 <psbt> | <hex128> ...\n");
+#endif
     fprintf(stderr, "       Run '%s --help' for the full command reference.\n", prog);
 }
 
@@ -81,15 +85,7 @@ static int psbt_to_base64(const uint8_t *data, size_t len) {
     return 0;
 }
 
-/*
- * Sparrow testnet4 v1 P2WPKH seed (64-byte BIP39 seed, hex):
- *   46b6b71e4a52ba6259aae7a9eaa991aea07fead2850cb9710aea4b234b73dcc
- *   26f21d986924ec4224f0fff3b2c73788de8e1f925451b79fcccbed9951b9b184d
- *
- * Example (path comes from PSBT BIP32 derivation field):
- *   ./fktsigner <seed_hex> m/84'/1'/0'/0/29 unsigned.psbt signed.psbt
- */
-
+#if FKT_BUILD_DEV_HARNESS
 static int hex_decode(const char *hex, uint8_t *out, int max_out) {
     int len = strlen(hex);
     int i;
@@ -101,6 +97,7 @@ static int hex_decode(const char *hex, uint8_t *out, int max_out) {
     }
     return len/2;
 }
+#endif
 
 static int fkt_cli_confirm_psbt(const char *input_psbt) {
     if (fkt_psbt_preview_prepare(input_psbt) != 0)
@@ -111,6 +108,7 @@ static int fkt_cli_confirm_psbt(const char *input_psbt) {
     return 0;
 }
 
+#if FKT_BUILD_DEV_HARNESS
 static int fkt_psbt_sign_from_seed(const char *input_psbt, const char *output_psbt,
                                    char words[MAX_WORDS][WORD_BUF], int num_words) {
     char mnemonic[512];
@@ -143,16 +141,143 @@ static int fkt_psbt_sign_from_seed(const char *input_psbt, const char *output_ps
     fkt_memzero_wipe_all();
     return 0;
 }
+#endif
+
+static int fkt_cli_run_qr(int argc, char **argv) {
+    char b64[FKT_QR_MAX_PAYLOAD + 1];
+    uint8_t raw[4096];
+    size_t raw_len;
+    const char *pbm_out;
+    const char *psbt_path;
+    FILE *f;
+    long sz;
+    int interactive;
+    int force_term;
+    int do_pbm;
+    int argi;
+    int total_mod;
+    int px;
+    int i;
+
+    fkt_ui_term_init();
+    interactive = 1;
+    force_term = 0;
+    do_pbm = 0;
+    pbm_out = NULL;
+    psbt_path = NULL;
+
+    if (strcmp(argv[2], "--psbt") == 0) {
+        if (argc < 4) {
+            fprintf(stderr, "Usage: %s qr --psbt <file.psbt> [--pbm out.pbm] [--term]\n", argv[0]);
+            return 1;
+        }
+        psbt_path = argv[3];
+        argi = 4;
+    } else {
+        argi = 3;
+    }
+
+    for (i = argi; i < argc; i++) {
+        if (strcmp(argv[i], "--pbm") == 0 && i + 1 < argc) {
+            pbm_out = argv[i + 1];
+            do_pbm = 1;
+            i++;
+        } else if (strcmp(argv[i], "--term") == 0) {
+            force_term = 1;
+        }
+    }
+
+    if (psbt_path != NULL) {
+        f = fopen(psbt_path, "rb");
+        if (!f) {
+            fprintf(stderr, "Cannot open %s\n", psbt_path);
+            return 1;
+        }
+        if (fseek(f, 0, SEEK_END) != 0) {
+            fclose(f);
+            return 1;
+        }
+        sz = ftell(f);
+        if (sz < 0 || (size_t)sz > sizeof(raw)) {
+            fclose(f);
+            fprintf(stderr, "PSBT too large for qr (max %lu bytes).\n",
+                    (unsigned long)sizeof(raw));
+            return 1;
+        }
+        rewind(f);
+        raw_len = (size_t)sz;
+        if (fread(raw, 1, raw_len, f) != raw_len) {
+            fclose(f);
+            return 1;
+        }
+        fclose(f);
+        if (psbt_to_base64_buf(raw, raw_len, b64, sizeof(b64)) != 0) {
+            fkt_memzero(raw, sizeof(raw));
+            fprintf(stderr, "Base64 conversion failed.\n");
+            return 1;
+        }
+        fkt_memzero(raw, sizeof(raw));
+        if (fkt_qr_encode_text(b64) != 0) {
+            fkt_memzero(b64, sizeof(b64));
+            fprintf(stderr, "QR encode failed (len=%lu).\n", (unsigned long)strlen(b64));
+            return 1;
+        }
+        printf("Signed PSBT base64 (%lu bytes)\n\n", (unsigned long)strlen(b64));
+        fkt_memzero(b64, sizeof(b64));
+    } else {
+        if (argi != 3 || argc < 3) {
+            fprintf(stderr, "Usage: %s qr <text> [--pbm out.pbm]\n", argv[0]);
+            fprintf(stderr, "       %s qr --psbt <file.psbt> [--pbm out.pbm] [--term]\n", argv[0]);
+            return 1;
+        }
+        if (fkt_qr_encode_text(argv[2]) != 0) {
+            fprintf(stderr, "QR encode failed.\n");
+            return 1;
+        }
+        printf("Payload: \"%s\"\n\n", argv[2]);
+    }
+
+    if (do_pbm) {
+        if (pbm_out == NULL) {
+            fprintf(stderr, "Usage: --pbm <file.pbm>\n");
+            fkt_qr_clear();
+            return 1;
+        }
+        total_mod = fkt_qr_size() + (FKT_QR_QUIET_ZONE * 2);
+        px = total_mod * FKT_QR_PBM_SCALE_DEFAULT;
+        if (fkt_qr_export_pbm(pbm_out, 0) != 0) {
+            fprintf(stderr, "Failed to write %s\n", pbm_out);
+            fkt_qr_clear();
+            return 1;
+        }
+        printf("Scannable QR image: %s (%dx%d px, square)\n", pbm_out, px, px);
+        printf("Open with: xdg-open %s\n", pbm_out);
+        printf("(or any image viewer — zoom to fit screen, then scan)\n\n");
+    }
+
+    if (fkt_qr_display(fkt_ui_term_cols(), fkt_ui_term_rows(), interactive, force_term) != 0) {
+        fkt_qr_clear();
+        fprintf(stderr, "QR display failed.\n");
+        return 1;
+    }
+
+    fkt_qr_clear();
+    return 0;
+}
 
 int main(int argc, char **argv) {
+#if FKT_BUILD_DEV_HARNESS
     char words[MAX_WORDS][WORD_BUF];
     int num_words = 0;
+#endif
     int i;
 
     fkt_memzero_install_sigint();
     fkt_confirm_set_ui_mode(0);
+#if FKT_BUILD_DEV_HARNESS
     if (getenv("FKT_NO_CONFIRM") != NULL)
         fkt_confirm_set_enabled(0);
+#endif
 
     if (argc == 2 && arg_is_help(argv[1])) {
         fkt_cli_print_help(stdout);
@@ -169,127 +294,10 @@ int main(int argc, char **argv) {
         return fkt_psbt_preview(argv[2]) != 0 ? 1 : 0;
     }
 
-    if (argc >= 3 && strcmp(argv[1], "qr") == 0) {
-        char b64[FKT_QR_MAX_PAYLOAD + 1];
-        uint8_t raw[4096];
-        size_t raw_len;
-        const char *pbm_out;
-        const char *psbt_path;
-        FILE *f;
-        long sz;
-        int interactive;
-        int force_term;
-        int do_pbm;
-        int argi;
-        int total_mod;
-        int px;
+    if (argc >= 3 && strcmp(argv[1], "qr") == 0)
+        return fkt_cli_run_qr(argc, argv);
 
-        fkt_ui_term_init();
-        interactive = 1;
-        force_term = 0;
-        do_pbm = 0;
-        pbm_out = NULL;
-        psbt_path = NULL;
-
-        if (strcmp(argv[2], "--psbt") == 0) {
-            if (argc < 4) {
-                fprintf(stderr, "Usage: %s qr --psbt <file.psbt> [--pbm out.pbm] [--term]\n", argv[0]);
-                return 1;
-            }
-            psbt_path = argv[3];
-            argi = 4;
-        } else {
-            argi = 3;
-        }
-
-        for (i = argi; i < argc; i++) {
-            if (strcmp(argv[i], "--pbm") == 0 && i + 1 < argc) {
-                pbm_out = argv[i + 1];
-                do_pbm = 1;
-                i++;
-            } else if (strcmp(argv[i], "--term") == 0) {
-                force_term = 1;
-            }
-        }
-
-        if (psbt_path != NULL) {
-            f = fopen(psbt_path, "rb");
-            if (!f) {
-                fprintf(stderr, "Cannot open %s\n", psbt_path);
-                return 1;
-            }
-            if (fseek(f, 0, SEEK_END) != 0) {
-                fclose(f);
-                return 1;
-            }
-            sz = ftell(f);
-            if (sz < 0 || (size_t)sz > sizeof(raw)) {
-                fclose(f);
-                fprintf(stderr, "PSBT too large for qr (max %lu bytes).\n",
-                        (unsigned long)sizeof(raw));
-                return 1;
-            }
-            rewind(f);
-            raw_len = (size_t)sz;
-            if (fread(raw, 1, raw_len, f) != raw_len) {
-                fclose(f);
-                return 1;
-            }
-            fclose(f);
-            if (psbt_to_base64_buf(raw, raw_len, b64, sizeof(b64)) != 0) {
-                fkt_memzero(raw, sizeof(raw));
-                fprintf(stderr, "Base64 conversion failed.\n");
-                return 1;
-            }
-            fkt_memzero(raw, sizeof(raw));
-            if (fkt_qr_encode_text(b64) != 0) {
-                fkt_memzero(b64, sizeof(b64));
-                fprintf(stderr, "QR encode failed (len=%lu).\n", (unsigned long)strlen(b64));
-                return 1;
-            }
-            printf("Signed PSBT base64 (%lu bytes)\n\n", (unsigned long)strlen(b64));
-            fkt_memzero(b64, sizeof(b64));
-        } else {
-            if (argi != 3 || argc < 3) {
-                fprintf(stderr, "Usage: %s qr <text> [--pbm out.pbm]\n", argv[0]);
-                fprintf(stderr, "       %s qr --psbt <file.psbt> [--pbm out.pbm] [--term]\n", argv[0]);
-                return 1;
-            }
-            if (fkt_qr_encode_text(argv[2]) != 0) {
-                fprintf(stderr, "QR encode failed.\n");
-                return 1;
-            }
-            printf("Payload: \"%s\"\n\n", argv[2]);
-        }
-
-        if (do_pbm) {
-            if (pbm_out == NULL) {
-                fprintf(stderr, "Usage: --pbm <file.pbm>\n");
-                fkt_qr_clear();
-                return 1;
-            }
-            total_mod = fkt_qr_size() + (FKT_QR_QUIET_ZONE * 2);
-            px = total_mod * FKT_QR_PBM_SCALE_DEFAULT;
-            if (fkt_qr_export_pbm(pbm_out, 0) != 0) {
-                fprintf(stderr, "Failed to write %s\n", pbm_out);
-                fkt_qr_clear();
-                return 1;
-            }
-            printf("Scannable QR image: %s (%dx%d px, square)\n", pbm_out, px, px);
-            printf("Open with: xdg-open %s\n", pbm_out);
-            printf("(or any image viewer — zoom to fit screen, then scan)\n\n");
-        }
-
-        if (fkt_qr_display(fkt_ui_term_cols(), fkt_ui_term_rows(), interactive, force_term) != 0) {
-            fkt_qr_clear();
-            fprintf(stderr, "QR display failed.\n");
-            return 1;
-        }
-
-        fkt_qr_clear();
-        return 0;
-    }
-
+#if FKT_BUILD_DEV_HARNESS
     if (argc >= 5 && strcmp(argv[1], "sign") == 0) {
         if (fkt_cli_confirm_psbt(argv[2]) != 0) {
             const char *cerr = fkt_last_error_get();
@@ -311,11 +319,12 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Invalid mnemonic string.\n");
         return 1;
     }
+#endif
 
-    if (argc == 1) {
+    if (argc == 1)
         return fkt_ui_main_menu();
-    }
 
+#if FKT_BUILD_DEV_HARNESS
     if (argc == 4 && strcmp(argv[1], "--pubkey") == 0) {
         uint8_t seed[64];
         uint8_t child_priv[32], child_pub33[33];
@@ -359,38 +368,15 @@ int main(int argc, char **argv) {
     }
 
     if (argc == 3 && strcmp(argv[1], "--base64") == 0) {
-        FILE *f;
-        long sz;
-        volatile uint8_t *buf;
-        f = fopen(argv[2], "rb");
-        if (!f) {
-            fprintf(stderr, "Cannot open %s\n", argv[2]);
+        if (fkt_psbt_load_file(argv[2]) != 0) {
+            fprintf(stderr, "Cannot load PSBT: %s\n", argv[2]);
             return 1;
         }
-        if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return 1; }
-        sz = ftell(f);
-        if (sz < 0 || (size_t)sz > FKT_PSBT_MAX_SIZE) { fclose(f); return 1; }
-        rewind(f);
-        buf = (volatile uint8_t *)malloc((size_t)sz);
-        if (!buf) { fclose(f); return 1; }
-        if (fread((void *)buf, 1, (size_t)sz, f) != (size_t)sz) {
-            free((void *)buf);
-            fclose(f);
-            return 1;
-        }
-        fclose(f);
-        fkt_memzero_register_b64((volatile void *)buf, (size_t)sz);
-        psbt_to_base64((const uint8_t *)buf, (size_t)sz);
-        fkt_memzero(buf, (size_t)sz);
-        free((void *)buf);
+        psbt_to_base64(psbt_buffer, psbt_size);
         return 0;
     }
 
-    if (argc != 5) {
-        print_usage_brief(argv[0]);
-        return 1;
-    }
-    {
+    if (argc == 5) {
         uint8_t seed[64];
         fkt_secp256k1_init();
         if (fkt_cli_confirm_psbt(argv[3]) != 0) {
@@ -410,6 +396,10 @@ int main(int argc, char **argv) {
             return 1;
         }
         fkt_cli_sign_success_interact(argv[4]);
+        return 0;
     }
-    return 0;
+#endif
+
+    print_usage_brief(argv[0]);
+    return 1;
 }

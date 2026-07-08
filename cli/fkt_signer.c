@@ -9,6 +9,7 @@
 #include "fkt_finalizer.h"
 #include "fkt_memzero.h"
 #include "fkt_compat.h"
+#include "fkt_platform.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,6 +46,14 @@ static void fkt_debug_master_fp(const uint8_t seed[64]) {
 #define fkt_debug_hex(label, buf, len) ((void)0)
 #define fkt_debug_master_fp(seed) ((void)0)
 #endif
+
+int fkt_signer_signed_inputs[FKT_MAX_PSBT_INPUTS];
+
+void fkt_signer_clear_signed_inputs(void) {
+    int i;
+    for (i = 0; i < FKT_MAX_PSBT_INPUTS; i++)
+        fkt_signer_signed_inputs[i] = 0;
+}
 
 static void fkt_shift_output_offsets(size_t from, long delta) {
     int j;
@@ -675,7 +684,9 @@ int fkt_sign_loaded_psbt(const uint8_t seed[64],
     }
 
     fkt_cleanup_signed_psbt_maps();
+#if !FKT_BUILD_NO_FINALIZER
     fkt_psbt_finalize(seed, path_override, parent_pub_override);
+#endif
 
     if (!signed_any) {
         int had_presigned = 0;

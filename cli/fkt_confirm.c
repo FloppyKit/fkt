@@ -28,8 +28,10 @@ void fkt_confirm_set_ui_mode(int on) {
 int fkt_confirm_active(void) {
     if (!g_confirm_enabled)
         return 0;
+#if FKT_BUILD_DEV_HARNESS
     if (getenv("FKT_NO_CONFIRM") != NULL)
         return 0;
+#endif
     if (!fkt_tty_is_interactive())
         return 0;
     return 1;

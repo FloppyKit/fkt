@@ -1,12 +1,20 @@
 CC = gcc
 SECP_DIR = ../secp256k1-build
 CFLAGS = -std=c89 -Wall -Wextra -I. -I$(SECP_DIR)/include -DFKT_LINUX=1 -DENABLE_MODULE_SCHNORRSIG -DENABLE_MODULE_EXTRAKEYS
+DEV_HARNESS ?= 1
+ifeq ($(DEV_HARNESS),1)
+CFLAGS += -DFKT_DEV_HARNESS=1
+endif
+NO_FINALIZER ?= 0
+ifeq ($(NO_FINALIZER),1)
+CFLAGS += -DFKT_NO_FINALIZER=1
+endif
 ifdef WARM
 CFLAGS += -DFKT_WARM_WALLET=1
 endif
 SECP_LIB = $(SECP_DIR)/libsecp256k1.a
 
-OBJS = main.o \
+BASE_OBJS = main.o \
        fkt_tty.o \
        fkt_screen.o \
        fkt_file.o \
@@ -35,7 +43,19 @@ OBJS = main.o \
        fkt_qrgen_wrap.o \
        fkt_qrgen.o
 
+ifeq ($(NO_FINALIZER),1)
+OBJS = $(filter-out fkt_finalizer.o,$(BASE_OBJS))
+else
+OBJS = $(BASE_OBJS)
+endif
+
+.PHONY: all warm fktsigner-release test-sparrow test-qr test-parse sparrow-base64 clean fuzz fuzz-corpus
+
 all: fktsigner fkt verify_ecdsa
+
+fktsigner-release:
+	$(MAKE) clean
+	$(MAKE) DEV_HARNESS=0 NO_FINALIZER=1 fktsigner
 
 warm:
 	$(MAKE) WARM=1 fktsigner fkt
@@ -60,8 +80,6 @@ endif
 
 PARSE_TEST_OBJS = fkt_psbt.o fkt_error.o fkt_sha256.o fkt_sha512.o fkt_util.o \
                   fkt_memzero.o
-
-.PHONY: test-sparrow test-qr test-parse sparrow-base64 clean fuzz fuzz-corpus warm
 
 $(SECP_LIB):
 	cd $(SECP_DIR) && gcc -std=c99 -O2 -Iinclude -Isrc -DENABLE_MODULE_SCHNORRSIG -DENABLE_MODULE_EXTRAKEYS -c src/secp256k1.c -o libsecp256k1_main.o

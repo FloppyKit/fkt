@@ -9,14 +9,6 @@
 #include <stdio.h>
 #include <string.h>
 
-int fkt_signer_signed_inputs[FKT_MAX_PSBT_INPUTS];
-
-void fkt_signer_clear_signed_inputs(void) {
-    int i;
-    for (i = 0; i < FKT_MAX_PSBT_INPUTS; i++)
-        fkt_signer_signed_inputs[i] = 0;
-}
-
 static void fkt_shift_output_offsets(size_t from, long delta) {
     int j;
     if (delta == 0) return;

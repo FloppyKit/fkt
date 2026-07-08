@@ -1037,10 +1037,12 @@ static void fkt_emit_cli_help(FILE *fp, int use_ui) {
     help_emit_line(fp, use_ui, "Example (all forms):");
     help_emit_line(fp, use_ui, "  fkt  |  fkt preview <psbt>  |  fkt inspect <psbt>");
     help_emit_line(fp, use_ui, "  fkt qr <text>  |  fkt qr --psbt <file> [--term] [--pbm f]");
+#if FKT_BUILD_DEV_HARNESS
     help_emit_line(fp, use_ui, "  fkt sign <in> <out> \"mnemonic\"  |  fkt --base64 <psbt>");
     help_emit_line(fp, use_ui, "  fkt <hex128> <path> <in> <out>");
     help_emit_line(fp, use_ui, "  fkt --pubkey <hex128> <path>");
     help_emit_line(fp, use_ui, "  fkt --parent-pubkey <hex> <path> <pub33> <in> <out>");
+#endif
     help_emit_line(fp, use_ui, "  fkt --help  |  fkt --version");
     help_emit_line(fp, use_ui, "");
     help_emit_line(fp, use_ui, "Arguments:");
@@ -1052,6 +1054,7 @@ static void fkt_emit_cli_help(FILE *fp, int use_ui) {
     help_emit_arg(fp, use_ui, "--psbt", "QR signed PSBT");
     help_emit_arg(fp, use_ui, "--term", "Force terminal QR");
     help_emit_arg(fp, use_ui, "--pbm", "Export PBM image");
+#if FKT_BUILD_DEV_HARNESS
     help_emit_arg(fp, use_ui, "sign", "Sign from mnemonic ([Q] QR after)");
     help_emit_arg(fp, use_ui, "<in>", "Input PSBT file");
     help_emit_arg(fp, use_ui, "<out>", "Output signed PSBT");
@@ -1062,6 +1065,7 @@ static void fkt_emit_cli_help(FILE *fp, int use_ui) {
     help_emit_arg(fp, use_ui, "--pubkey", "Print derived pubkey");
     help_emit_arg(fp, use_ui, "--parent-pubkey", "Advanced cosign path");
     help_emit_arg(fp, use_ui, "<pub33>", "Parent pubkey hex");
+#endif
     help_emit_arg(fp, use_ui, "<psbt>", "File or pasted base64");
     help_emit_arg(fp, use_ui, "--help, -h", "Print this help");
     help_emit_arg(fp, use_ui, "--version", "Print version string");
