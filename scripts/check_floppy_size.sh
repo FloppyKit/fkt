@@ -2,7 +2,7 @@
 # Verify DOS EXE fits floppy budget (default 1.20 MiB for FKTSIGNER.EXE alone).
 set -euo pipefail
 
-EXE="${1:-cli/FKTSIGNER.EXE}"
+EXE="${1:-cli/FKTSIGN.EXE}"
 MAX_BYTES="${FKT_FLOPPY_EXE_MAX:-1258291}"
 
 if [ ! -f "$EXE" ]; then

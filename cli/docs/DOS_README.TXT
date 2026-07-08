@@ -3,7 +3,7 @@ FKT Signer - DOS / 486 Floppy Build
 
 Files on the 1.44 MB floppy
 ---------------------------
-  FKTSIGNER.EXE   Main signer (interactive menu UI)
+  FKTSIGN.EXE     Main signer (8.3 name; was FKTSIGNER — too long for DOS)
   CWSDPMI.EXE     DPMI server (required by DJGPP programs)
   README.TXT      This file (copy of docs/DOS_README.TXT)
 
@@ -18,7 +18,7 @@ Boot and run
 ------------
   1. Boot FreeDOS (or MS-DOS 6.x) from floppy or hard disk.
   2. Insert the FKT floppy and:  A:
-  3. Run:  FKTSIGNER.EXE
+  3. Run:  FKTSIGN.EXE
   4. Use the on-screen menu to load seed, load PSBT, preview, and sign.
 
 PSBT files
@@ -34,12 +34,12 @@ QR display
 Building from source (Linux host)
 ---------------------------------
   scripts/bootstrap_djgpp.sh          # once: install cross-compiler
-  cd cli && make -f Makefile.dos      # produces FKTSIGNER.EXE
-  ../scripts/check_floppy_size.sh FKTSIGNER.EXE
-  ../scripts/dosbox_smoke.sh FKTSIGNER.EXE
+  cd cli && make -f Makefile.dos      # produces FKTSIGN.EXE
+  ../scripts/check_floppy_size.sh FKTSIGN.EXE
+  ../scripts/dosbox_smoke.sh FKTSIGN.EXE
 
-Copy CWSDPMI.EXE from your DJGPP installation (bin/cwsdpmi.exe) onto the
-floppy alongside FKTSIGNER.EXE.
+dosbox_smoke.sh fetches CWSDPMI.EXE automatically. On a real floppy, copy
+CWSDPMI.EXE alongside FKTSIGN.EXE (scripts cache it under tools/cwsdpmi/).
 
 Security notes
 --------------

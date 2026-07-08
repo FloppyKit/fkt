@@ -3,6 +3,7 @@
 *.txt
 !docs/DOS_README.TXT
 dos-obj/
+FKTSIGN.EXE
 FKTSIGNER.EXE
 secp256k1-build/
 fs/
