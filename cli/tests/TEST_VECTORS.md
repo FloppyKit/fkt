@@ -93,7 +93,7 @@ Policy: **partial_sig only** for P2WSH in v0.1 (not full finalize).
 
 | ID    | Filename                              | Script Type          | U | S | F | V | Notes |
 |-------|---------------------------------------|----------------------|---|---|---|---|-------|
-| V3-01 | true mixed p2wpkh+p2tr                | Mixed                | [ ] | [ ] | [ ] | [ ] | re-export if current mixed is multi-P2WPKH only |
+| V3-01 | true mixed p2wpkh+p2tr                | Mixed                | [x] | [ ] | [x] | [x] | Promoted to V1-H09; legs in `mixed-leg-p2wpkh` / `mixed-leg-p2tr` |
 | V3-02 | v3_mixed_p2wpkh_p2wsh_2in_2out        | Mixed                | [ ] | [ ] | [ ] | [ ] | |
 | V3-03 | v3_p2tr_script_path_simple            | P2TR Script-path     | [ ] | [ ] | [ ] | [ ] | need leaf+control block fixtures |
 | V3-04 | v3_ark_boarding_basic                 | Ark Boarding         | [ ] | [ ] | [ ] | [ ] | |
