@@ -3,6 +3,7 @@
 
 #include "fkt_qr_vga.h"
 #include "fkt_qr.h"
+#include "fkt_platform.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -219,17 +220,16 @@ static void fkt_fb_end(void) {
 
 #if defined(__DJGPP__)
 static void fkt_dos_set_px(int x, int y, int dark) {
-    unsigned char *fb;
-    int offset;
+    unsigned long addr;
 
     if (!g_dos_vga_on)
         return;
     if (x < 0 || y < 0 || x >= FKT_VGA_W || y >= FKT_VGA_H)
         return;
-    /* DJGPP DPMI maps VGA plane A at linear 0xA0000000. */
-    fb = (unsigned char *)0xA0000000;
-    offset = y * 320 + x;
-    fb[offset] = (unsigned char)(dark ? 0 : 15);
+    /* Mode 13h framebuffer is physical A000:0000. Under DJGPP DPMI you must
+     * poke via the DOS-memory selector — a flat 0xA0000000 write page-faults. */
+    addr = 0xA0000UL + (unsigned long)y * 320UL + (unsigned long)x;
+    _farpokeb(_dos_ds, addr, (unsigned char)(dark ? 0 : 15));
 }
 
 static int fkt_dos_vga_begin(void) {
@@ -342,6 +342,8 @@ void fkt_qr_vga_wait_key(void) {
 #if defined(__DJGPP__) || defined(__WATCOMC__)
     (void)getch();
     fkt_dos_vga_end();
+    /* Restore 80x25 green chrome (mode 03 alone leaves a blank white screen). */
+    fkt_screen_after_graphics();
 #elif defined(FKT_QR_VGA_FB)
     printf("  -- Press Enter to continue --");
     fflush(stdout);

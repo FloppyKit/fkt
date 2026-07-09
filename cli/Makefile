@@ -18,6 +18,8 @@ BASE_OBJS = main.o \
        fkt_tty.o \
        fkt_screen.o \
        fkt_file.o \
+       fkt_pick.o \
+       fkt_cam.o \
        fkt_ui.o \
        fkt_seed.o \
        fkt_bip39.o \

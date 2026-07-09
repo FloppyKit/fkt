@@ -1,10 +1,14 @@
+#if !(defined(FKT_DOS) && FKT_DOS)
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include "fkt_seed.h"
 #include "fkt_bip39.h"
 #include "fkt_memzero.h"
 #include "fkt_error.h"
 #include "fkt_ui.h"
+#include "fkt_platform.h"
+/* fkt_last_error_* via fkt_error.h */
 #include "fkt_pbkdf2.h"
 #include "fkt_signer.h"
 #include "fkt_secp256k1.h"
@@ -15,11 +19,20 @@
 #include <ctype.h>
 #include <stdint.h>
 
+/* Color strings are ANSI-only; on DOS fkt_ui_green_str()/VRAM recolor handle it. */
+#if FKT_PLATFORM_DOS
+#define SEED_GREEN   ""
+#define SEED_RED     ""
+#define SEED_YELLOW  ""
+#define SEED_DIM     ""
+#define SEED_RESET   ""
+#else
 #define SEED_GREEN   "\033[1;32m"
 #define SEED_RED     "\033[1;31m"
 #define SEED_YELLOW  "\033[1;33m"
 #define SEED_DIM     "\033[32m"
 #define SEED_RESET   "\033[0m"
+#endif
 
 /*
  * Box layout (all drawing math lives here — 80-col safe):
@@ -263,9 +276,8 @@ static void fkt_seed_clear_below_box(int total) {
 
     if (clear_from < g_term_rows - 2) {
         for (i = clear_from; i < g_term_rows - 2; i++)
-            printf("\033[%d;1H\033[2K", i);
+            fkt_screen_clear_line(i);
     }
-    fflush(stdout);
 }
 
 /* Pack text into the inner band: [BOX_PAD_H spaces][BOX_CONTENT_W chars] */
@@ -293,12 +305,15 @@ static void fkt_seed_pack_inner(char *out, const char *text, int center) {
 static void fkt_seed_draw_row(int row, const char *text, const char *color,
                               int center) {
     char inner[BOX_INNER_W + 1];
+    int col;
 
     (void)color;
     fkt_seed_pack_inner(inner, text, center);
 
-    printf("\033[%d;1H\033[2K", row);
-    fkt_seed_put_hpad(BOX_VISIBLE);
+    /* Absolute positioning — never raw ANSI on DOS (it stacks rows). */
+    fkt_screen_clear_line(row);
+    col = fkt_seed_hpad(BOX_VISIBLE) + 1;
+    fkt_screen_goto(row, col);
     fputs(fkt_ui_green_str(), stdout);
     fputs(BOX_V, stdout);
     fputs(inner, stdout);
@@ -310,9 +325,11 @@ static void fkt_seed_draw_row(int row, const char *text, const char *color,
 static void fkt_seed_box_edge_top(void) {
     int i;
     int row = g_vpad + 1;
+    int col;
 
-    printf("\033[%d;1H\033[2K", row);
-    fkt_seed_put_hpad(BOX_VISIBLE);
+    fkt_screen_clear_line(row);
+    col = fkt_seed_hpad(BOX_VISIBLE) + 1;
+    fkt_screen_goto(row, col);
     fputs(fkt_ui_green_str(), stdout);
     fputs(BOX_TL, stdout);
     for (i = 0; i < BOX_INNER_W; i++)
@@ -324,9 +341,11 @@ static void fkt_seed_box_edge_top(void) {
 static void fkt_seed_box_edge_bottom(void) {
     int i;
     int row = g_bottom_row;
+    int col;
 
-    printf("\033[%d;1H\033[2K", row);
-    fkt_seed_put_hpad(BOX_VISIBLE);
+    fkt_screen_clear_line(row);
+    col = fkt_seed_hpad(BOX_VISIBLE) + 1;
+    fkt_screen_goto(row, col);
     fputs(fkt_ui_green_str(), stdout);
     fputs(BOX_BL, stdout);
     for (i = 0; i < BOX_INNER_W; i++)
@@ -392,6 +411,11 @@ static void fkt_seed_redraw_content(const char words[MAX_WORDS][WORD_BUF],
                                     const char *prompt,
                                     const char *status) {
     int r;
+    int grid_rows = fkt_seed_grid_rows(total);
+
+    /* Clear every grid row first so DOS never stacks partial lines. */
+    for (r = 0; r < grid_rows; r++)
+        fkt_seed_box_blank_row(g_grid_start_row + r);
 
     if (total > 0) {
         fkt_seed_render_grid(words, filled, total);
@@ -417,6 +441,7 @@ static void fkt_seed_redraw_content(const char words[MAX_WORDS][WORD_BUF],
 
     fkt_seed_box_edge_bottom();
     fkt_ui_pin_session_footer();
+    fkt_screen_recolor();
 }
 
 static const char *fkt_seed_status_color(const char *status) {
@@ -442,15 +467,13 @@ static void fkt_seed_cursor_after_prompt(const char *prompt) {
     int col = fkt_seed_hpad(BOX_VISIBLE) + 2 + BOX_PAD_H + (int)strlen(prompt);
 
     fkt_ui_set_input_pos(g_input_row, col);
-    printf("\033[%d;%dH", g_input_row, col);
-    fflush(stdout);
+    fkt_screen_goto(g_input_row, col);
 }
 
 static void fkt_seed_wipe_input_typed(void) {
     /* Enter lands on the bottom-border row; restore it, then reclaim input row */
     fkt_seed_box_edge_bottom();
-    printf("\033[%d;1H", g_input_row);
-    fflush(stdout);
+    fkt_screen_goto(g_input_row, 1);
 }
 
 static void fkt_seed_prompt_input(const char *prompt) {
@@ -636,7 +659,15 @@ static int fkt_seed_collect_words(char words[MAX_WORDS][WORD_BUF], int num_words
     } else {
         fkt_seed_draw_screen(words, filled, num_words, prompt,
                              SEED_MSG_BAD_CHECKSUM, 0);
+        fkt_last_error_set(SEED_MSG_BAD_CHECKSUM);
         fkt_secure_zero(words, sizeof(words[0]) * MAX_WORDS);
+        {
+            char dummy[8];
+            fkt_ui_body_puts("");
+            fkt_ui_body_puts("Press Enter to return...");
+            fkt_ui_set_input_pos(0, 0);
+            (void)fkt_ui_read_line(dummy, sizeof(dummy), 0);
+        }
         return 0;
     }
     return 1;
@@ -645,11 +676,22 @@ static int fkt_seed_collect_words(char words[MAX_WORDS][WORD_BUF], int num_words
 int fkt_interactive_seed(char words[MAX_WORDS][WORD_BUF], int *num_words) {
     fkt_seed_term_size();
     fkt_seed_clear_screen();
-    if (!fkt_seed_prompt_count(num_words))
+    fkt_last_error_clear();
+    if (!fkt_seed_prompt_count(num_words)) {
+        fkt_last_error_set("Word count cancelled or invalid (need 12 or 24).");
         return 0;
-    if (!fkt_seed_collect_words(words, *num_words))
+    }
+    if (!fkt_seed_collect_words(words, *num_words)) {
+        if (fkt_last_error_get() == NULL || fkt_last_error_get()[0] == '\0')
+            fkt_last_error_set("Seed entry cancelled or checksum invalid.");
         return 0;
-    return fkt_verify_seed(words, *num_words);
+    }
+    if (!fkt_verify_seed(words, *num_words)) {
+        if (fkt_last_error_get() == NULL || fkt_last_error_get()[0] == '\0')
+            fkt_last_error_set("Seed verification failed or cancelled.");
+        return 0;
+    }
+    return 1;
 }
 
 int fkt_verify_seed(char words[MAX_WORDS][WORD_BUF], int num_words) {
@@ -690,6 +732,7 @@ int fkt_verify_seed(char words[MAX_WORDS][WORD_BUF], int num_words) {
     if (strcmp(reentry, words[idx]) != 0) {
         fkt_seed_draw_screen(words, num_words, num_words, prompt,
                              SEED_MSG_MISMATCH, 0);
+        fkt_last_error_set(SEED_MSG_MISMATCH);
         fkt_secure_zero(words, sizeof(words[0]) * MAX_WORDS);
         return 0;
     }
@@ -704,10 +747,12 @@ int fkt_verify_seed(char words[MAX_WORDS][WORD_BUF], int num_words) {
     fkt_seed_wipe_input_typed();
     fkt_seed_redraw_input_line("Type CONFIRM to accept seed:");
 
+    fkt_seed_lowercase(confirm);
     if (strcmp(confirm, "confirm") != 0) {
         fkt_seed_draw_screen(words, num_words, num_words,
                              "Type CONFIRM to accept seed:",
                              SEED_MSG_NOT_CONFIRMED, 0);
+        fkt_last_error_set(SEED_MSG_NOT_CONFIRMED);
         fkt_secure_zero(words, sizeof(words[0]) * MAX_WORDS);
         return 0;
     }

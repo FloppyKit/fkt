@@ -170,9 +170,28 @@ static int confirm_read_confirm_input(char *buf, size_t len, int ui_mode) {
 }
 
 static int confirm_user_typed_confirm(const char *line) {
-    if (!line)
+    char buf[64];
+    size_t i;
+    size_t n;
+
+    if (!line || line[0] == '\0')
         return 0;
-    return (strcmp(line, "confirm") == 0 || strcmp(line, "CONFIRM") == 0);
+    /* Case-insensitive "confirm" (trim spaces). */
+    n = 0;
+    while (*line == ' ' || *line == '\t')
+        line++;
+    while (*line && n + 1 < sizeof(buf)) {
+        char c = *line++;
+        if (c >= 'A' && c <= 'Z')
+            c = (char)(c - 'A' + 'a');
+        buf[n++] = c;
+    }
+    buf[n] = '\0';
+    while (n > 0 && (buf[n - 1] == ' ' || buf[n - 1] == '\t')) {
+        buf[--n] = '\0';
+    }
+    (void)i;
+    return strcmp(buf, "confirm") == 0;
 }
 
 static void confirm_show_fingerprint_banner(void) {
@@ -224,12 +243,24 @@ int fkt_confirm_before_sign_ui(void) {
         fkt_ui_body_puts(fp_line);
     }
     fkt_ui_body_puts("");
-    fkt_ui_body_puts("Type CONFIRM to sign this PSBT:");
+    fkt_ui_body_puts("Type the word CONFIRM then Enter to sign:");
+    fkt_ui_body_puts("(Esc cancels)");
     fkt_ui_pin_session_footer();
-    if (!confirm_read_confirm_input(line, sizeof(line), 1))
+    /* Ensure interactive input lands on a real line (not leftover pos 0). */
+    {
+        int rows = fkt_ui_term_rows();
+        int row = rows > 6 ? rows - 4 : 10;
+        fkt_ui_set_input_pos(row, fkt_ui_body_col());
+        fkt_screen_goto(row, fkt_ui_body_col());
+        fkt_screen_cursor_show();
+    }
+    if (!confirm_read_confirm_input(line, sizeof(line), 1)) {
+        fkt_last_error_set("Signing cancelled.");
         return -1;
+    }
     if (!confirm_user_typed_confirm(line)) {
-        fkt_last_error_set("Signing cancelled (fingerprint not confirmed).");
+        fkt_last_error_set(
+            "Signing cancelled - type CONFIRM exactly (any case).");
         return -1;
     }
     return 0;

@@ -1,10 +1,13 @@
 /* fkt_preview.c - read-only PSBT preview (no seed required) */
+#if !(defined(FKT_DOS) && FKT_DOS)
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include "fkt_preview.h"
 #include "fkt_psbt.h"
 #include "fkt_error.h"
 #include "fkt_ui.h"
+#include "fkt_platform.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -65,27 +68,36 @@ static void print_hex_full(const uint8_t *buf, size_t len) {
         printf("%02x", buf[i]);
 }
 
-static void print_output_program(const uint8_t *spk, size_t len) {
+/* One address/program per line (no wrap mid-hex on 80-col DOS). */
+static void print_output_program_line(const uint8_t *spk, size_t len) {
+    int col = fkt_ui_body_col();
+    int j;
+
     preview_color();
+    for (j = 1; j < col + 4; j++)
+        putchar(' ');
     if (len == 22 && spk[0] == 0x00 && spk[1] == 0x14) {
-        printf("v0_pkh_20B:");
+        fputs("addr v0_pkh:", stdout);
         print_hex_full(spk + 2, 20);
     } else if (len == 34 && spk[0] == 0x51 && spk[1] == 0x20) {
-        printf("v1_tap_32B:");
+        fputs("addr v1_tap:", stdout);
         print_hex_full(spk + 2, 32);
     } else if (len >= 23 && spk[0] == 0xa9 && spk[1] == 0x14) {
-        printf("p2sh_hash20B:");
+        fputs("addr p2sh:", stdout);
         print_hex_full(spk + 2, 20);
     } else if (len >= 25 && spk[0] == 0x76 && spk[1] == 0xa9 && spk[2] == 0x14) {
-        printf("pkh_hash20B:");
+        fputs("addr pkh:", stdout);
         print_hex_full(spk + 3, 20);
     } else if (len == 34 && spk[0] == 0x00 && spk[1] == 0x20) {
-        printf("v0_wsh_32B:");
+        fputs("addr v0_wsh:", stdout);
         print_hex_full(spk + 2, 32);
     } else {
         printf("script_%luB:", (unsigned long)len);
-        print_hex_full(spk, len);
+        print_hex_full(spk, len > 32 ? 32 : len);
+        if (len > 32)
+            fputs("...", stdout);
     }
+    putchar('\n');
 }
 
 static int preview_any_signed_input(void) {
@@ -98,47 +110,13 @@ static int preview_any_signed_input(void) {
     return 0;
 }
 
-static void render_preview_debug(void) {
+static int any_rbf(void) {
     int i;
-
-    if (!fkt_ui_debug_enabled())
-        return;
-
-    putchar('\n');
-    fputs("\033[35m", stdout);
-    printf("  -- DEBUG --\n");
-    printf("  PSBT bytes:    %lu\n", (unsigned long)psbt_size);
-    printf("  Inputs/Outs:   %d / %d\n",
-           psbt_data.num_inputs, psbt_data.num_outputs);
-    printf("  Unsigned tx:   %lu bytes\n",
-           (unsigned long)psbt_data.unsigned_tx_len);
-    printf("  Sign state:    %s\n",
-           preview_any_signed_input()
-               ? "SIGNED (final scriptSig or witness present)"
-               : "UNSIGNED (no final scriptSig or witness)");
-    printf("  PSBT SHA256:   ");
-    print_hex_full(psbt_data.psbt_fingerprint, 32);
-    putchar('\n');
-
     for (i = 0; i < psbt_data.num_inputs; i++) {
-        printf("  in[%d] type=%u amt=%s spk=%s deriv=%s scriptSig=%s witness=%s\n",
-               i, (unsigned)psbt_data.input_script_type[i],
-               psbt_data.input_has_amount[i] ? "yes" : "no",
-               psbt_data.input_has_witness_script[i] ? "yes" : "no",
-               psbt_data.input_has_deriv_path[i] ? "yes" : "no",
-               psbt_data.input_had_final_scriptsig[i] ? "yes" : "no",
-               psbt_data.input_had_final_witness[i] ? "yes" : "no");
-        if (psbt_data.input_has_witness_script[i]) {
-            printf("        spk_%luB: ",
-                   (unsigned long)psbt_data.input_witness_script_len[i]);
-            print_hex_full(psbt_data.input_witness_script[i],
-                           psbt_data.input_witness_script_len[i]);
-            putchar('\n');
-        }
+        if (psbt_data.input_sequence[i] < 0xFFFFFFFEu)
+            return 1;
     }
-    printf("  (Programs above are full witness hashes, not bech32 addresses.)\n");
-    fputs("\033[0m", stdout);
-    preview_color();
+    return 0;
 }
 
 static size_t estimate_vsize(void) {
@@ -148,23 +126,40 @@ static size_t estimate_vsize(void) {
 
     for (i = 0; i < psbt_data.num_inputs; i++) {
         uint8_t st = psbt_data.input_script_type[i];
-        if (st == SCRIPT_TYPE_P2WPKH || st == SCRIPT_TYPE_P2SH_P2WPKH) twb += 109;
-        else if (st == SCRIPT_TYPE_P2TR) twb += 65;
-        else if (st == SCRIPT_TYPE_P2WSH) twb += 110;
-        else if (st == SCRIPT_TYPE_P2PKH) twb += 107;
-        else twb += 107;
+        if (st == SCRIPT_TYPE_P2WPKH || st == SCRIPT_TYPE_P2SH_P2WPKH)
+            twb += 109;
+        else if (st == SCRIPT_TYPE_P2TR)
+            twb += 65;
+        else if (st == SCRIPT_TYPE_P2WSH)
+            twb += 110;
+        else if (st == SCRIPT_TYPE_P2PKH)
+            twb += 107;
+        else
+            twb += 107;
     }
     w = (size_t)psbt_data.unsigned_tx_len * 4 + twb;
     return (w + 3) / 4;
 }
 
-static int any_rbf(void) {
-    int i;
-    for (i = 0; i < psbt_data.num_inputs; i++) {
-        if (psbt_data.input_sequence[i] < 0xFFFFFFFEu)
-            return 1;
+/* Compact debug: never push fee/header off a 25-line screen. */
+static void render_preview_debug(void) {
+    if (!fkt_ui_debug_enabled())
+        return;
+
+    {
+        char fp[17];
+        int i;
+
+        for (i = 0; i < 8; i++)
+            snprintf(fp + i * 2, 3, "%02x",
+                     (unsigned)psbt_data.psbt_fingerprint[i]);
+        preview_puts("");
+        preview_body_printf("DEBUG: %lu B  in/out %d/%d  %s\n",
+                            (unsigned long)psbt_size,
+                            psbt_data.num_inputs, psbt_data.num_outputs,
+                            preview_any_signed_input() ? "SIGNED" : "UNSIGNED");
+        preview_body_printf("DEBUG: fp %s...\n", fp);
     }
-    return 0;
 }
 
 static void render_preview(void) {
@@ -188,27 +183,17 @@ static void render_preview(void) {
     }
 
     preview_body_printf("v0 (BIP-174) * TX v%u\n", (unsigned)tx_version);
-    preview_color();
-    {
-        int col = fkt_ui_body_col();
-        int i;
-        for (i = 1; i < col; i++)
-            putchar(' ');
-    }
-    fputs("Unsigned txid: ", stdout);
-    print_txid_reversed(psbt_data.txid);
-    putchar('\n');
 
-    preview_color();
+    preview_body_printf("Unsigned txid:\n");
     {
         int col = fkt_ui_body_col();
         int j;
-        for (j = 1; j < col; j++)
+        preview_color();
+        for (j = 1; j < col + 2; j++)
             putchar(' ');
+        print_txid_reversed(psbt_data.txid);
+        putchar('\n');
     }
-    fputs("PSBT fingerprint (for confirmation): ", stdout);
-    print_hex_full(psbt_data.psbt_fingerprint, 32);
-    putchar('\n');
 
     if (psbt_data.locktime > 0)
         snprintf(lock_rbf, sizeof(lock_rbf),
@@ -253,25 +238,16 @@ static void render_preview(void) {
         const uint8_t *spk = psbt_data.output_script[i];
         size_t slen = psbt_data.output_script_len[i];
 
-        preview_color();
-        {
-            int col = fkt_ui_body_col();
-            int j;
-            for (j = 1; j < col; j++)
-                putchar(' ');
-        }
-        printf("[%d] %lld sats  %s  ",
-               i, (long long)psbt_data.output_amount[i],
-               output_script_label(spk, slen));
-        print_output_program(spk, slen);
-        putchar('\n');
+        /* Amount + type on one line; full address on the next line alone. */
+        preview_body_printf("[%d] %lld sats  %s\n",
+                            i, (long long)psbt_data.output_amount[i],
+                            output_script_label(spk, slen));
+        print_output_program_line(spk, slen);
         total_out += psbt_data.output_amount[i];
     }
 
     fee = total_in - total_out;
     vsize = estimate_vsize();
-
-    render_preview_debug();
 
     preview_puts("");
     preview_body_printf("Fee:           %lld sats\n", (long long)fee);
@@ -281,6 +257,9 @@ static void render_preview(void) {
                             (unsigned long)vsize);
     else
         preview_body_printf("Fee rate:      n/a\n");
+
+    /* Debug last so fee stays visible; keep it tiny. */
+    render_preview_debug();
 }
 
 void fkt_psbt_preview_render(void) {
@@ -288,6 +267,8 @@ void fkt_psbt_preview_render(void) {
 }
 
 int fkt_psbt_preview_prepare(const char *psbt_path) {
+    int old_lenient;
+
     if (!psbt_path || psbt_path[0] == '\0')
         return -1;
 
@@ -297,10 +278,14 @@ int fkt_psbt_preview_prepare(const char *psbt_path) {
         return -1;
     }
 
+    old_lenient = fkt_psbt_lenient_parse;
+    fkt_psbt_lenient_parse = 1;
     if (fkt_psbt_try_parse() != 0) {
+        fkt_psbt_lenient_parse = old_lenient;
         fkt_psbt_init();
         return -1;
     }
+    fkt_psbt_lenient_parse = old_lenient;
     return 0;
 }
 
@@ -310,6 +295,9 @@ static void preview_draw_interactive_screen(void) {
     fkt_ui_body_puts("");
     fkt_ui_body_puts("[Q] QR PSBT   [Enter] Exit");
     fkt_ui_pin_session_footer();
+    /* No input cursor on preview — key-driven only. */
+    fkt_ui_set_input_pos(0, 0);
+    fkt_screen_cursor_hide();
 }
 
 int fkt_psbt_preview(const char *psbt_path) {

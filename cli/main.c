@@ -15,6 +15,7 @@
 #include "fkt_qr.h"
 #include "fkt_version.h"
 #include "fkt_platform.h"
+#include "fkt_error.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -29,6 +30,8 @@ static int arg_is_version(const char *s) {
 
 static void print_usage_brief(const char *prog) {
     fprintf(stderr, "Usage: %s [--help | --version | inspect <psbt> | qr ...]\n", prog);
+    fprintf(stderr, "       %s sign --psbt <in> --out <out> --seed \"words...\"\n", prog);
+    fprintf(stderr, "       %s sign --psbt <in> --out <out>   (seed on stdin)\n", prog);
     fprintf(stderr, "       %s                    (interactive menu)\n", prog);
 #if FKT_BUILD_DEV_HARNESS
     fprintf(stderr, "       Dev: sign <in> <out> \"mnemonic\" | --base64 <psbt> | <hex128> ...\n");
@@ -111,40 +114,104 @@ static int fkt_cli_confirm_psbt(const char *input_psbt) {
     return 0;
 }
 
-#if FKT_BUILD_DEV_HARNESS
-static int fkt_psbt_sign_from_seed(const char *input_psbt, const char *output_psbt,
-                                   char words[MAX_WORDS][WORD_BUF], int num_words) {
-    char mnemonic[512];
-    uint8_t seed[64];
-    static const uint8_t salt[] = "mnemonic";
-    int i;
-    int pos = 0;
-
-    for (i = 0; i < num_words; i++) {
-        size_t wlen;
-        if (i > 0) mnemonic[pos++] = ' ';
-        wlen = strlen(words[i]);
-        if (pos + (int)wlen >= (int)sizeof(mnemonic)) return -1;
-        memcpy(mnemonic + pos, words[i], wlen);
-        pos += (int)wlen;
-    }
-    mnemonic[pos] = '\0';
-
-    fkt_memzero_register_seed(seed, sizeof(seed));
-    fkt_memzero_register_mnemonic(mnemonic, sizeof(mnemonic));
-    fkt_memzero_register_words(words, sizeof(words[0]) * MAX_WORDS);
-
-    fkt_pbkdf2_hmac_sha512(mnemonic, (size_t)pos, salt, 8, 2048, seed, 64);
-    fkt_memzero(mnemonic, sizeof(mnemonic));
-    fkt_secp256k1_init();
-    if (fkt_sign_psbt(seed, "", input_psbt, output_psbt) != 0) {
-        fkt_memzero_wipe_all();
+/* PR5 pure CLI: always available (no TUI). */
+static int fkt_cli_sign_psbt_words(const char *input_psbt, const char *output_psbt,
+                                  char words[MAX_WORDS][WORD_BUF], int num_words) {
+    if (fkt_sign_psbt_from_words(input_psbt, output_psbt, words, num_words) != 0)
         return -1;
-    }
-    fkt_memzero_wipe_all();
     return 0;
 }
-#endif
+
+/*
+ * fkt sign --psbt in.psbt --out out.psbt --seed "w1 w2 ..."
+ * fkt sign --psbt in.psbt --out out.psbt   (mnemonic on stdin, one line)
+ * Optional: --yes  skip interactive CONFIRM (scripted / offline pipeline)
+ */
+static int fkt_cli_run_sign(int argc, char **argv) {
+    const char *psbt_in = NULL;
+    const char *psbt_out = NULL;
+    const char *seed_str = NULL;
+    int yes = 0;
+    int i;
+    char words[MAX_WORDS][WORD_BUF];
+    int num_words = 0;
+    char seed_line[512];
+
+    for (i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--psbt") == 0 && i + 1 < argc) {
+            psbt_in = argv[++i];
+        } else if (strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
+            psbt_out = argv[++i];
+        } else if ((strcmp(argv[i], "--seed") == 0 ||
+                    strcmp(argv[i], "--mnemonic") == 0) && i + 1 < argc) {
+            seed_str = argv[++i];
+        } else if (strcmp(argv[i], "--yes") == 0 || strcmp(argv[i], "-y") == 0) {
+            yes = 1;
+        } else if (argv[i][0] != '-') {
+            /* Legacy: sign <in> <out> "mnemonic" */
+            if (!psbt_in)
+                psbt_in = argv[i];
+            else if (!psbt_out)
+                psbt_out = argv[i];
+            else if (!seed_str)
+                seed_str = argv[i];
+        } else {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            return 1;
+        }
+    }
+
+    if (!psbt_in || !psbt_out) {
+        fprintf(stderr,
+                "Usage: %s sign --psbt <in.psbt> --out <out.psbt> "
+                "[--seed \"words...\"] [--yes]\n",
+                argv[0]);
+        fprintf(stderr, "       Seed may also be piped on stdin (one line).\n");
+        return 1;
+    }
+
+    if (!seed_str) {
+        if (!fgets(seed_line, sizeof(seed_line), stdin)) {
+            fprintf(stderr, "No seed on stdin and no --seed given.\n");
+            return 1;
+        }
+        {
+            size_t n = strlen(seed_line);
+            while (n > 0 && (seed_line[n - 1] == '\n' || seed_line[n - 1] == '\r'))
+                seed_line[--n] = '\0';
+        }
+        seed_str = seed_line;
+    }
+
+    if (!fkt_seed_from_string(seed_str, words, &num_words)) {
+        fprintf(stderr, "Invalid mnemonic.\n");
+        return 1;
+    }
+
+    if (yes)
+        fkt_confirm_set_enabled(0);
+
+    if (fkt_cli_confirm_psbt(psbt_in) != 0) {
+        const char *cerr = fkt_last_error_get();
+        if (cerr && cerr[0] != '\0')
+            fprintf(stderr, "%s\n", cerr);
+        else
+            fprintf(stderr, "PSBT confirmation failed.\n");
+        return 1;
+    }
+
+    if (fkt_cli_sign_psbt_words(psbt_in, psbt_out, words, num_words) != 0) {
+        const char *cerr = fkt_last_error_get();
+        if (cerr && cerr[0] != '\0')
+            fprintf(stderr, "%s\n", cerr);
+        else
+            fprintf(stderr, "Signing failed.\n");
+        return 1;
+    }
+
+    printf("Signed PSBT written: %s\n", psbt_out);
+    return 0;
+}
 
 static int fkt_cli_run_qr(int argc, char **argv) {
     char b64[FKT_QR_MAX_PAYLOAD + 1];
@@ -269,11 +336,10 @@ static int fkt_cli_run_qr(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-#if FKT_BUILD_DEV_HARNESS
-    char words[MAX_WORDS][WORD_BUF];
-    int num_words = 0;
-#endif
     int i;
+
+    /* Do NOT fkt_dos_init here — pure CLI must not clear the host screen.
+     * Interactive TUI calls fkt_dos_init via fkt_ui_term_init(). */
 
     fkt_memzero_install_sigint();
     fkt_psbt_set_argv0(argv[0]);
@@ -301,29 +367,9 @@ int main(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[1], "qr") == 0)
         return fkt_cli_run_qr(argc, argv);
 
-#if FKT_BUILD_DEV_HARNESS
-    if (argc >= 5 && strcmp(argv[1], "sign") == 0) {
-        if (fkt_cli_confirm_psbt(argv[2]) != 0) {
-            const char *cerr = fkt_last_error_get();
-            if (cerr && cerr[0] != '\0')
-                fprintf(stderr, "%s\n", cerr);
-            else
-                fprintf(stderr, "PSBT confirmation failed.\n");
-            return 1;
-        }
-        if (fkt_seed_from_string(argv[4], words, &num_words)) {
-            printf("Mnemonic loaded (%d words)\n", num_words);
-            if (fkt_psbt_sign_from_seed(argv[2], argv[3], words, num_words) != 0) {
-                fprintf(stderr, "Signing failed.\n");
-                return 1;
-            }
-            fkt_cli_sign_success_interact(argv[3]);
-            return 0;
-        }
-        fprintf(stderr, "Invalid mnemonic string.\n");
-        return 1;
-    }
-#endif
+    /* PR5: pure CLI sign (always on, DOS + Linux). */
+    if (argc >= 2 && strcmp(argv[1], "sign") == 0)
+        return fkt_cli_run_sign(argc, argv);
 
     if (argc == 1)
         return fkt_ui_main_menu();
