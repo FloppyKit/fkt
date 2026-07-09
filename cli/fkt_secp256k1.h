@@ -19,6 +19,7 @@ int fkt_schnorr_sign(const uint8_t privkey[32], const uint8_t msg[32],
                      uint8_t sig[64], int *sig_len);
 
 int fkt_schnorr_sign_taproot(const uint8_t privkey[32], const uint8_t msg[32],
+                             const uint8_t internal_key[32],
                              const uint8_t *merkle_root, size_t merkle_root_len,
                              uint8_t sig[64], int *sig_len);
 

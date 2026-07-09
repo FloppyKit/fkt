@@ -1,0 +1,5 @@
+HELLO
+Directory of C:\.
+SMOKE    TXT                  7 07-07-2026 21:53
+    1 File(s)                 7 Bytes.
+    0 Dir(s)        262,111,744 Bytes free.

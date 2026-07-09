@@ -27,13 +27,19 @@ int fkt_bip143_sighash_p2wsh(int input_index,
 /* BIP-341 key-path (basic) */
 int fkt_bip341_sighash(int input_index, uint8_t sighash[32]);
 
-/* BIP-341 script-path (ext_flag=1, no annex); uses leaf stored in psbt_data */
+/* BIP-341 script-path (ext_flag=1, no annex) */
 int fkt_bip341_sighash_scriptpath(int input_index, uint8_t sighash[32]);
 
 /* BIP-342 TapLeaf hash */
 int fkt_tapleaf_hash(uint8_t leaf_version,
                      const uint8_t *script, size_t script_len,
                      uint8_t out[32]);
+
+/* Legacy pre-segwit P2PKH (SIGHASH_ALL) */
+int fkt_legacy_p2pkh_sighash(int input_index,
+                             const uint8_t *scriptpubkey, size_t scriptpubkey_len,
+                             uint32_t sighash_type,
+                             uint8_t sighash[32]);
 
 #ifdef __cplusplus
 }

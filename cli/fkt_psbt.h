@@ -3,6 +3,7 @@
 
 #include "fkt_compat.h"   /* uint8_t, uint32_t, etc. */
 #include <stddef.h>       /* size_t */
+#include <setjmp.h>
 
 /* -------------------------------------------------------------------------
  * PSBT constants (BIP-174)
@@ -16,9 +17,15 @@
 #define FKT_PSBT_SEPARATOR            0x00
 
 #define FKT_PSBT_MAX_SIZE             1572864UL
+#define FKT_PSBT_UNSIGNED_TX_MAX      102400UL
+#define FKT_PSBT_NON_WITNESS_UTXO_MAX 102400UL
+#define FKT_PSBT_MAX_OUTPUTS          64
+/* Max chars for UI/CLI PSBT path or pasted base64 (≈6 KB raw PSBT). */
+#define FKT_PSBT_INPUT_MAX            8192
 
 /* global map key types */
 #define FKT_PSBT_GLOBAL_UNSIGNED_TX   0x00
+#define FKT_PSBT_GLOBAL_XPUB          0x01
 
 /* input map key types */
 #define FKT_PSBT_IN_NON_WITNESS_UTXO      0x00
@@ -62,6 +69,7 @@
 #define SCRIPT_TYPE_P2TR         3
 #define SCRIPT_TYPE_P2SH         4
 #define SCRIPT_TYPE_P2SH_P2WPKH  5
+#define SCRIPT_TYPE_P2PKH        6
 
 /* ---- shared data (used by sighash and signer) ---- */
 #define MAX_PSBT_ITEMS 256
@@ -94,7 +102,7 @@ typedef struct {
     uint8_t  input_tap_leaf_version [MAX_PSBT_ITEMS];
     uint8_t  input_tap_control_block [MAX_PSBT_ITEMS][FKT_TAP_CONTROL_BLOCK_MAX];
     size_t   input_tap_control_block_len [MAX_PSBT_ITEMS];
-    int      input_is_script_path  [MAX_PSBT_ITEMS]; /* 1 = sign via script-path */
+    int      input_is_script_path  [MAX_PSBT_ITEMS];
     uint8_t  input_witness_script     [MAX_PSBT_ITEMS][520];
     size_t   input_witness_script_len [MAX_PSBT_ITEMS];
     int      input_has_witness_script [MAX_PSBT_ITEMS];
@@ -107,6 +115,8 @@ typedef struct {
     int      input_has_deriv_path     [MAX_PSBT_ITEMS];
     uint8_t  input_deriv_parent_pub   [MAX_PSBT_ITEMS][33];
     int      input_has_deriv_parent_pub [MAX_PSBT_ITEMS];
+    int      input_had_final_witness    [MAX_PSBT_ITEMS];
+    int      input_had_final_scriptsig  [MAX_PSBT_ITEMS];
 
     int64_t  output_amount      [MAX_PSBT_ITEMS];
     uint8_t  output_script      [MAX_PSBT_ITEMS][520];
@@ -140,10 +150,22 @@ extern size_t   psbt_size;
 
 /* parser / preview API */
 void fkt_psbt_init(void);
+void fkt_psbt_set_argv0(const char *argv0);
 int  fkt_psbt_load_file(const char *path);
 int  fkt_psbt_load_base64(const char *b64_str);
+int  fkt_psbt_bytes_to_base64(const uint8_t *data, size_t len, char *out, size_t out_max);
+int  fkt_psbt_loaded_to_base64(char *out, size_t out_max);
+int  fkt_psbt_file_to_base64(const char *path, char *out, size_t out_max);
+int  fkt_psbt_load_input(const char *input);
 void fkt_psbt_parse(void);
-void fkt_psbt_preview(void);
+
+/* Fuzz-only: skips finalized-witness, sighash, and fee checks. Never set in production. */
+extern int fkt_psbt_lenient_parse;
+extern int fkt_psbt_fuzz_mode;
+extern jmp_buf fkt_psbt_fuzz_jmp;
+
+int  fkt_psbt_load_memory(const uint8_t *data, size_t len);
+int  fkt_psbt_try_parse(void);
 
 const uint8_t* fkt_get_witness_script(int input_index, size_t *out_len);
 

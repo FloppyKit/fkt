@@ -1,0 +1,37 @@
+FKT Signer v0.1.0
+=================
+
+Offline single-sig PSBT signer for air-gapped / floppy use.
+
+Supported
+---------
+  - BIP39 seed load (12/24 words) and on-device seed generation
+  - PSBT load: directory browse, file path, or base64 paste
+  - Read-only transaction preview (amounts, fee, RBF, derivation paths)
+  - Signing: P2WPKH and Taproot key-path (P2TR)
+  - Dual CONFIRM gates before write; wrong-seed errors when keys do not match
+  - QR display for seed backup and signed PSBT (terminal / VGA where available)
+  - Linux CLI (fktsigner / fkt) and DOS TUI (FKTSIGN.EXE + CWSDPMI.EXE)
+
+Not in v0.1
+-----------
+  - Camera / QR capture of PSBTs
+  - Taproot script-path spends
+  - Ark / Bark protocol (boarding, exit, rounds) — planned post-0.1
+  - Multisig cosign as a productized workflow
+  - PWA / bootable GUI productization
+
+Security model
+--------------
+  - Stateless by default: seed lives in RAM for the session only
+  - Key material wiped after successful sign and on SIGINT
+  - Keep the machine offline; verify addresses on a second device
+
+Build
+-----
+  Linux:  cd cli && make
+  DOS:    cd cli && make -f Makefile.dos   -> FKTSIGN.EXE
+  Size:   ../scripts/check_floppy_size.sh FKTSIGN.EXE
+  Smoke:  ../scripts/dosbox_smoke.sh FKTSIGN.EXE
+
+Version: 0.1.0

@@ -1,0 +1,86 @@
+# Makefile.dos - DJGPP i386 DOS floppy build (PR3)
+# Requires: i586-pc-msdosdjgpp-gcc on PATH (see scripts/bootstrap_djgpp.sh)
+
+DJGPP_ROOT ?= $(abspath ../tools/djgpp)
+export LD_LIBRARY_PATH := $(DJGPP_ROOT)/lib/host:$(LD_LIBRARY_PATH)
+DOS_CC     ?= $(DJGPP_ROOT)/bin/i586-pc-msdosdjgpp-gcc
+DOS_AR     ?= $(DJGPP_ROOT)/bin/i586-pc-msdosdjgpp-ar
+
+SECP_DIR   = ../secp256k1-build-dos
+OBJDIR     = dos-obj
+# DOS 8.3: basename must be <= 8 chars (FKTSIGNER = 9, fails in COMMAND.COM).
+TARGET     = FKTSIGN.EXE
+
+SECP_DEFS  = -DECMULT_WINDOW_SIZE=2 -DCOMB_BLOCKS=2 -DCOMB_TEETH=5
+CFLAGS     = -std=gnu89 -Wall -Wextra -Os -I. -I$(SECP_DIR)/include \
+             -DFKT_DOS=1 -DFKT_FLOPPY=1 -DFKT_ASCII_ONLY=1 -DFKT_NO_FINALIZER=1 \
+             -DENABLE_MODULE_SCHNORRSIG -DENABLE_MODULE_EXTRAKEYS $(SECP_DEFS)
+
+SECP_LIB   = $(SECP_DIR)/libsecp256k1.a
+
+BASE_OBJS  = main.o \
+             fkt_tty.o \
+             fkt_screen.o \
+             fkt_file.o \
+             fkt_pick.o \
+             fkt_cam.o \
+             fkt_ui.o \
+             fkt_seed.o \
+             fkt_bip39.o \
+             fkt_error.o \
+             fkt_util.o \
+             fkt_sha256.o \
+             fkt_sha512.o \
+             fkt_hmac.o \
+             fkt_pbkdf2.o \
+             fkt_ripemd160.o \
+             fkt_hash160.o \
+             fkt_bip32.o \
+             fkt_secp256k1.o \
+             fkt_psbt.o \
+             fkt_preview.o \
+             fkt_confirm.o \
+             fkt_memzero.o \
+             fkt_sighash.o \
+             fkt_signer.o \
+             fkt_qr.o \
+             fkt_qr_vga.o \
+             fkt_qrgen_wrap.o \
+             fkt_qrgen.o
+
+OBJS       = $(addprefix $(OBJDIR)/,$(BASE_OBJS))
+
+.PHONY: all clean secp check-size
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS) $(SECP_LIB)
+	$(DOS_CC) -o $@ $(OBJS) $(SECP_LIB) -Wl,--gc-sections
+	@echo "Built $(TARGET) ($$(stat -c%s $(TARGET) 2>/dev/null || wc -c < $(TARGET)) bytes)"
+
+secp:
+	$(MAKE) -C .. -f scripts/build_secp_dos.mk
+
+$(SECP_LIB):
+	$(MAKE) secp
+
+$(OBJDIR):
+	mkdir -p $(OBJDIR)
+
+$(OBJDIR)/%.o: %.c | $(OBJDIR)
+	$(DOS_CC) $(CFLAGS) -c -o $@ $<
+
+$(OBJDIR)/fkt_qrgen.o: fkt_qrgen.c fkt_qrgen.h | $(OBJDIR)
+	$(DOS_CC) -std=gnu99 -Wall -Wextra -Os -I. -c -o $@ fkt_qrgen.c
+
+$(OBJDIR)/fkt_qrgen_wrap.o: fkt_qrgen_wrap.c fkt_qrgen_wrap.h fkt_qrgen.h | $(OBJDIR)
+	$(DOS_CC) -std=gnu99 -Wall -Wextra -Os -I. -c -o $@ fkt_qrgen_wrap.c
+
+$(OBJDIR)/fkt_qr_vga.o: fkt_qr_vga.c fkt_qr_vga.h fkt_qr.h | $(OBJDIR)
+	$(DOS_CC) $(CFLAGS) -c -o $@ fkt_qr_vga.c
+
+check-size: $(TARGET)
+	@../scripts/check_floppy_size.sh $(TARGET)
+
+clean:
+	rm -rf $(OBJDIR) $(TARGET)

@@ -2,6 +2,7 @@
 #include "fkt_psbt.h"          /* for psbt_data access */
 #include "fkt_sha256.h"
 #include "fkt_secp256k1.h"
+#include "fkt_memzero.h"
 #include <string.h>
 
 /* External data from fkt_psbt.c */
@@ -154,6 +155,7 @@ int fkt_bip143_sighash(int input_index,
     *ptr++ = 0x01; *ptr++ = 0x00; *ptr++ = 0x00; *ptr++ = 0x00;
 
     fkt_sha256d(preimage, (size_t)(ptr - preimage), sighash);
+    fkt_memzero(preimage, sizeof(preimage));
     return 0;
 }
 
@@ -234,6 +236,8 @@ int fkt_bip143_sighash_p2wsh(int input_index,
     *ptr++ = 0x01; *ptr++ = 0x00; *ptr++ = 0x00; *ptr++ = 0x00;
 
     fkt_sha256d(preimage, (size_t)(ptr - preimage), sighash);
+    fkt_memzero(preimage, sizeof(preimage));
+    fkt_memzero(script_code, sizeof(script_code));
     return 0;
 }
 
@@ -285,12 +289,15 @@ int fkt_bip341_sighash(int input_index, uint8_t sighash[32]) {
     *ptr++ = (uint8_t)((input_index >> 16) & 0xFF);
     *ptr++ = (uint8_t)((input_index >> 24) & 0xFF);
 
-    if (fkt_tagged_sha256("TapSighash", 10, preimage, (size_t)(ptr - preimage), sighash) != 0)
+    if (fkt_tagged_sha256("TapSighash", 10, preimage, (size_t)(ptr - preimage), sighash) != 0) {
+        fkt_memzero(preimage, sizeof(preimage));
         return -1;
+    }
+    fkt_memzero(preimage, sizeof(preimage));
     return 0;
 }
 
-/* BIP-342 TapLeaf hash: tagged_hash("TapLeaf", leaf_ver || compact_size(script) || script) */
+/* BIP-342 TapLeaf hash */
 int fkt_tapleaf_hash(uint8_t leaf_version,
                      const uint8_t *script, size_t script_len,
                      uint8_t out[32]) {
@@ -313,10 +320,15 @@ int fkt_tapleaf_hash(uint8_t leaf_version,
     memcpy(buf + pos, script, script_len);
     pos += script_len;
 
-    return fkt_tagged_sha256("TapLeaf", 7, buf, pos, out);
+    if (fkt_tagged_sha256("TapLeaf", 7, buf, pos, out) != 0) {
+        fkt_memzero(buf, sizeof(buf));
+        return -1;
+    }
+    fkt_memzero(buf, sizeof(buf));
+    return 0;
 }
 
-/* BIP-341 script-path: spend_type=0x02, then tapleaf_hash|key_version|codesep_pos */
+/* BIP-341 script-path sighash */
 int fkt_bip341_sighash_scriptpath(int input_index, uint8_t sighash[32]) {
     uint8_t preimage[320];
     uint8_t *ptr = preimage;
@@ -337,41 +349,141 @@ int fkt_bip341_sighash_scriptpath(int input_index, uint8_t sighash[32]) {
                ((uint32_t)tx[2] << 16) | ((uint32_t)tx[3] << 24);
     nLockTime = psbt_data.locktime;
 
-    *ptr++ = 0x00; /* epoch */
-    *ptr++ = 0x00; /* SIGHASH_DEFAULT */
+    *ptr++ = 0x00;
+    *ptr++ = 0x00;
+    *ptr++ = (uint8_t)(nVersion & 0xFF);
+    *ptr++ = (uint8_t)((nVersion >> 8) & 0xFF);
+    *ptr++ = (uint8_t)((nVersion >> 16) & 0xFF);
+    *ptr++ = (uint8_t)((nVersion >> 24) & 0xFF);
+    *ptr++ = (uint8_t)(nLockTime & 0xFF);
+    *ptr++ = (uint8_t)((nLockTime >> 8) & 0xFF);
+    *ptr++ = (uint8_t)((nLockTime >> 16) & 0xFF);
+    *ptr++ = (uint8_t)((nLockTime >> 24) & 0xFF);
+    memcpy(ptr, sha_prevouts, 32); ptr += 32;
+    memcpy(ptr, sha_amounts, 32); ptr += 32;
+    memcpy(ptr, sha_scriptpubkeys, 32); ptr += 32;
+    memcpy(ptr, sha_sequences, 32); ptr += 32;
+    memcpy(ptr, sha_outputs, 32); ptr += 32;
+    *ptr++ = 0x02; /* script-path, no annex */
+    *ptr++ = (uint8_t)(input_index & 0xFF);
+    *ptr++ = (uint8_t)((input_index >> 8) & 0xFF);
+    *ptr++ = (uint8_t)((input_index >> 16) & 0xFF);
+    *ptr++ = (uint8_t)((input_index >> 24) & 0xFF);
+    memcpy(ptr, leaf_hash, 32); ptr += 32;
+    *ptr++ = 0x00;
+    *ptr++ = 0xFF; *ptr++ = 0xFF; *ptr++ = 0xFF; *ptr++ = 0xFF;
+
+    if (fkt_tagged_sha256("TapSighash", 10, preimage, (size_t)(ptr - preimage), sighash) != 0) {
+        fkt_memzero(preimage, sizeof(preimage));
+        fkt_memzero(leaf_hash, sizeof(leaf_hash));
+        return -1;
+    }
+    fkt_memzero(preimage, sizeof(preimage));
+    fkt_memzero(leaf_hash, sizeof(leaf_hash));
+    return 0;
+}
+
+static size_t fkt_sighash_write_compact_size(uint8_t *out, uint64_t val) {
+    if (val < 0xFD) {
+        out[0] = (uint8_t)val;
+        return 1;
+    }
+    if (val <= 0xFFFF) {
+        out[0] = 0xFD;
+        out[1] = (uint8_t)(val & 0xFF);
+        out[2] = (uint8_t)((val >> 8) & 0xFF);
+        return 3;
+    }
+    return 0;
+}
+
+static size_t fkt_sighash_write_script(uint8_t *out,
+                                       const uint8_t *script, size_t script_len) {
+    size_t n = fkt_sighash_write_compact_size(out, (uint64_t)script_len);
+    if (n == 0) return 0;
+    memcpy(out + n, script, script_len);
+    return n + script_len;
+}
+
+/* Classic P2PKH sighash (pre-segwit, SIGHASH_ALL). */
+int fkt_legacy_p2pkh_sighash(int input_index,
+                             const uint8_t *scriptpubkey, size_t scriptpubkey_len,
+                             uint32_t sighash_type,
+                             uint8_t sighash[32]) {
+    uint8_t buf[4096];
+    uint8_t *ptr = buf;
+    const uint8_t *tx = psbt_data.raw_unsigned_tx;
+    uint32_t nVersion;
+    size_t n;
+    int i, j;
+
+    if (input_index < 0 || input_index >= psbt_data.num_inputs) return -1;
+    if (scriptpubkey == NULL || scriptpubkey_len == 0 || scriptpubkey_len > 520)
+        return -1;
+
+    nVersion = (uint32_t)tx[0] | ((uint32_t)tx[1] << 8) |
+               ((uint32_t)tx[2] << 16) | ((uint32_t)tx[3] << 24);
 
     *ptr++ = (uint8_t)(nVersion & 0xFF);
     *ptr++ = (uint8_t)((nVersion >> 8) & 0xFF);
     *ptr++ = (uint8_t)((nVersion >> 16) & 0xFF);
     *ptr++ = (uint8_t)((nVersion >> 24) & 0xFF);
 
-    *ptr++ = (uint8_t)(nLockTime & 0xFF);
-    *ptr++ = (uint8_t)((nLockTime >> 8) & 0xFF);
-    *ptr++ = (uint8_t)((nLockTime >> 16) & 0xFF);
-    *ptr++ = (uint8_t)((nLockTime >> 24) & 0xFF);
+    n = fkt_sighash_write_compact_size(ptr, (uint64_t)psbt_data.num_inputs);
+    if (n == 0) return -1;
+    ptr += n;
 
-    memcpy(ptr, sha_prevouts, 32); ptr += 32;
-    memcpy(ptr, sha_amounts, 32); ptr += 32;
-    memcpy(ptr, sha_scriptpubkeys, 32); ptr += 32;
-    memcpy(ptr, sha_sequences, 32); ptr += 32;
-    memcpy(ptr, sha_outputs, 32); ptr += 32;
+    for (i = 0; i < psbt_data.num_inputs; i++) {
+        memcpy(ptr, psbt_data.input_txid[i], 32);
+        ptr += 32;
+        *ptr++ = (uint8_t)(psbt_data.input_vout[i] & 0xFF);
+        *ptr++ = (uint8_t)((psbt_data.input_vout[i] >> 8) & 0xFF);
+        *ptr++ = (uint8_t)((psbt_data.input_vout[i] >> 16) & 0xFF);
+        *ptr++ = (uint8_t)((psbt_data.input_vout[i] >> 24) & 0xFF);
 
-    *ptr++ = 0x02; /* spend_type: ext_flag=1, no annex */
+        if (i == input_index) {
+            n = fkt_sighash_write_script(ptr, scriptpubkey, scriptpubkey_len);
+            if (n == 0) return -1;
+            ptr += n;
+        } else {
+            *ptr++ = 0x00;
+        }
 
-    *ptr++ = (uint8_t)(input_index & 0xFF);
-    *ptr++ = (uint8_t)((input_index >> 8) & 0xFF);
-    *ptr++ = (uint8_t)((input_index >> 16) & 0xFF);
-    *ptr++ = (uint8_t)((input_index >> 24) & 0xFF);
+        *ptr++ = (uint8_t)(psbt_data.input_sequence[i] & 0xFF);
+        *ptr++ = (uint8_t)((psbt_data.input_sequence[i] >> 8) & 0xFF);
+        *ptr++ = (uint8_t)((psbt_data.input_sequence[i] >> 16) & 0xFF);
+        *ptr++ = (uint8_t)((psbt_data.input_sequence[i] >> 24) & 0xFF);
+    }
 
-    memcpy(ptr, leaf_hash, 32); ptr += 32;
-    *ptr++ = 0x00; /* key_version */
-    /* codesep_pos = 0xffffffff (no OP_CODESEPARATOR) */
-    *ptr++ = 0xFF;
-    *ptr++ = 0xFF;
-    *ptr++ = 0xFF;
-    *ptr++ = 0xFF;
+    n = fkt_sighash_write_compact_size(ptr, (uint64_t)psbt_data.num_outputs);
+    if (n == 0) return -1;
+    ptr += n;
 
-    if (fkt_tagged_sha256("TapSighash", 10, preimage, (size_t)(ptr - preimage), sighash) != 0)
-        return -1;
+    for (i = 0; i < psbt_data.num_outputs; i++) {
+        int64_t amount = psbt_data.output_amount[i];
+        for (j = 0; j < 8; j++)
+            ptr[j] = (uint8_t)(amount >> (8 * j));
+        ptr += 8;
+
+        n = fkt_sighash_write_script(ptr,
+                                     psbt_data.output_script[i],
+                                     psbt_data.output_script_len[i]);
+        if (n == 0) return -1;
+        ptr += n;
+    }
+
+    *ptr++ = (uint8_t)(psbt_data.locktime & 0xFF);
+    *ptr++ = (uint8_t)((psbt_data.locktime >> 8) & 0xFF);
+    *ptr++ = (uint8_t)((psbt_data.locktime >> 16) & 0xFF);
+    *ptr++ = (uint8_t)((psbt_data.locktime >> 24) & 0xFF);
+
+    *ptr++ = (uint8_t)(sighash_type & 0xFF);
+    *ptr++ = (uint8_t)((sighash_type >> 8) & 0xFF);
+    *ptr++ = (uint8_t)((sighash_type >> 16) & 0xFF);
+    *ptr++ = (uint8_t)((sighash_type >> 24) & 0xFF);
+
+    if ((size_t)(ptr - buf) > sizeof(buf)) return -1;
+    fkt_sha256d(buf, (size_t)(ptr - buf), sighash);
+    fkt_memzero(buf, sizeof(buf));
     return 0;
 }
