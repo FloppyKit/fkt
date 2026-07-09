@@ -289,3 +289,89 @@ int fkt_bip341_sighash(int input_index, uint8_t sighash[32]) {
         return -1;
     return 0;
 }
+
+/* BIP-342 TapLeaf hash: tagged_hash("TapLeaf", leaf_ver || compact_size(script) || script) */
+int fkt_tapleaf_hash(uint8_t leaf_version,
+                     const uint8_t *script, size_t script_len,
+                     uint8_t out[32]) {
+    uint8_t buf[1 + 9 + FKT_TAP_LEAF_SCRIPT_MAX];
+    size_t pos = 0;
+
+    if (!script || !out) return -1;
+    if (script_len > FKT_TAP_LEAF_SCRIPT_MAX) return -1;
+
+    buf[pos++] = leaf_version;
+    if (script_len < 0xFDu) {
+        buf[pos++] = (uint8_t)script_len;
+    } else if (script_len <= 0xFFFFu) {
+        buf[pos++] = 0xFD;
+        buf[pos++] = (uint8_t)(script_len & 0xFF);
+        buf[pos++] = (uint8_t)((script_len >> 8) & 0xFF);
+    } else {
+        return -1;
+    }
+    memcpy(buf + pos, script, script_len);
+    pos += script_len;
+
+    return fkt_tagged_sha256("TapLeaf", 7, buf, pos, out);
+}
+
+/* BIP-341 script-path: spend_type=0x02, then tapleaf_hash|key_version|codesep_pos */
+int fkt_bip341_sighash_scriptpath(int input_index, uint8_t sighash[32]) {
+    uint8_t preimage[320];
+    uint8_t *ptr = preimage;
+    uint8_t leaf_hash[32];
+    uint32_t nVersion, nLockTime;
+    const uint8_t *tx = psbt_data.raw_unsigned_tx;
+
+    if (input_index < 0 || input_index >= psbt_data.num_inputs) return -1;
+    if (!psbt_data.input_has_tap_leaf[input_index]) return -1;
+
+    if (fkt_tapleaf_hash(psbt_data.input_tap_leaf_version[input_index],
+                         psbt_data.input_tap_leaf_script[input_index],
+                         psbt_data.input_tap_leaf_script_len[input_index],
+                         leaf_hash) != 0)
+        return -1;
+
+    nVersion = (uint32_t)tx[0] | ((uint32_t)tx[1] << 8) |
+               ((uint32_t)tx[2] << 16) | ((uint32_t)tx[3] << 24);
+    nLockTime = psbt_data.locktime;
+
+    *ptr++ = 0x00; /* epoch */
+    *ptr++ = 0x00; /* SIGHASH_DEFAULT */
+
+    *ptr++ = (uint8_t)(nVersion & 0xFF);
+    *ptr++ = (uint8_t)((nVersion >> 8) & 0xFF);
+    *ptr++ = (uint8_t)((nVersion >> 16) & 0xFF);
+    *ptr++ = (uint8_t)((nVersion >> 24) & 0xFF);
+
+    *ptr++ = (uint8_t)(nLockTime & 0xFF);
+    *ptr++ = (uint8_t)((nLockTime >> 8) & 0xFF);
+    *ptr++ = (uint8_t)((nLockTime >> 16) & 0xFF);
+    *ptr++ = (uint8_t)((nLockTime >> 24) & 0xFF);
+
+    memcpy(ptr, sha_prevouts, 32); ptr += 32;
+    memcpy(ptr, sha_amounts, 32); ptr += 32;
+    memcpy(ptr, sha_scriptpubkeys, 32); ptr += 32;
+    memcpy(ptr, sha_sequences, 32); ptr += 32;
+    memcpy(ptr, sha_outputs, 32); ptr += 32;
+
+    *ptr++ = 0x02; /* spend_type: ext_flag=1, no annex */
+
+    *ptr++ = (uint8_t)(input_index & 0xFF);
+    *ptr++ = (uint8_t)((input_index >> 8) & 0xFF);
+    *ptr++ = (uint8_t)((input_index >> 16) & 0xFF);
+    *ptr++ = (uint8_t)((input_index >> 24) & 0xFF);
+
+    memcpy(ptr, leaf_hash, 32); ptr += 32;
+    *ptr++ = 0x00; /* key_version */
+    /* codesep_pos = 0xffffffff (no OP_CODESEPARATOR) */
+    *ptr++ = 0xFF;
+    *ptr++ = 0xFF;
+    *ptr++ = 0xFF;
+    *ptr++ = 0xFF;
+
+    if (fkt_tagged_sha256("TapSighash", 10, preimage, (size_t)(ptr - preimage), sighash) != 0)
+        return -1;
+    return 0;
+}

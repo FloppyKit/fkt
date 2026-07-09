@@ -256,6 +256,19 @@
       }
     },
     {
+      "id": "p2tr_script_path_synthetic",
+      "unsigned": "unsigned/p2tr_script_path_synthetic.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/p2tr_script_path_synthetic.psbt",
+      "expect": "sign",
+      "script": "p2tr_script_path",
+      "priority": "high",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "notes": "v0.2 synthetic single-leaf <pk> OP_CHECKSIG; make test-scriptpath",
+      "fkt_signed_status": "regen"
+    },
+    {
       "id": "p2wpkh_3in_1out",
       "unsigned": "unsigned/p2wpkh_3in_1out.psbt",
       "sparrow_signed": "sparrow-signed/p2wpkh_3in_1out.psbt",

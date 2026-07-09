@@ -606,8 +606,28 @@ static void parse_inputs(int expected_inputs) {
                 if(vl!=32) fkt_psbt_die("TAP_INTERNAL_KEY must be 32 bytes.");
                 memcpy(psbt_data.input_tap_int_key[i], v, 32);
                 psbt_data.input_has_tap_int_key[i]=1; break;
+            case FKT_PSBT_IN_TAP_LEAF_SCRIPT:
+                /* BIP-371: key data = control block; value = script || leaf_version */
+                if (kdl < 33 || kdl > FKT_TAP_CONTROL_BLOCK_MAX)
+                    fkt_psbt_die("TAP_LEAF_SCRIPT control block size invalid.");
+                if (vl < 2)
+                    fkt_psbt_die("TAP_LEAF_SCRIPT value too short.");
+                {
+                    size_t script_len = vl - 1;
+                    if (script_len == 0 || script_len > FKT_TAP_LEAF_SCRIPT_MAX)
+                        fkt_psbt_die("TAP_LEAF_SCRIPT script size invalid.");
+                    memcpy(psbt_data.input_tap_control_block[i], kd, kdl);
+                    psbt_data.input_tap_control_block_len[i] = kdl;
+                    memcpy(psbt_data.input_tap_leaf_script[i], v, script_len);
+                    psbt_data.input_tap_leaf_script_len[i] = script_len;
+                    psbt_data.input_tap_leaf_version[i] = v[script_len];
+                    psbt_data.input_has_tap_leaf[i] = 1;
+                }
+                break;
             case FKT_PSBT_IN_TAP_MERKLE_ROOT:
                 if(vl!=32) fkt_psbt_die("TAP_MERKLE_ROOT must be 32 bytes.");
+                memcpy(psbt_data.input_tap_merkle_root[i], v, 32);
+                psbt_data.input_has_tap_merkle_root[i] = 1;
                 hmr=1; break;
             case FKT_PSBT_IN_PROPRIETARY: break;
             default: break;
@@ -639,7 +659,12 @@ static void parse_inputs(int expected_inputs) {
 
         psbt_data.input_has_amount[i] = af;
         psbt_data.input_script_type[i] = st;
-        if(st == SCRIPT_TYPE_P2TR && hmr) fkt_psbt_die("Taproot input has script tree (0x18) — V0.1 only supports keypath spending");
+        /* v0.2: script-path if we have leaf + (merkle root or control block).
+         * Tree without a leaf we can sign → hard reject. */
+        if (st == SCRIPT_TYPE_P2TR && hmr && !psbt_data.input_has_tap_leaf[i])
+            fkt_psbt_die("Taproot script tree (0x18) without TAP_LEAF_SCRIPT — cannot script-path sign.");
+        if (st == SCRIPT_TYPE_P2TR && psbt_data.input_has_tap_leaf[i])
+            psbt_data.input_is_script_path[i] = 1;
         { int j; for(j=0;j<ns;j++) if(memcmp(seen[j].txid,psbt_data.input_txid[i],32)==0&&seen[j].vout==psbt_data.input_vout[i]) fkt_psbt_die("Duplicate outpoint detected.");
           memcpy(seen[ns].txid,psbt_data.input_txid[i],32); seen[ns].vout=psbt_data.input_vout[i]; ns++; }
     }

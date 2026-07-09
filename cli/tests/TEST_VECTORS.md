@@ -39,6 +39,7 @@ Canonical IDs match `sparrow-real/manifest.json` (not always `v1_` prefix).
 | V1-H07 | `p2tr_2in_2out` | P2TR | [x] | [x] | [x] | [x] | |
 | V1-H08 | `p2tr_rbf` | P2TR | [x] | [x] | [x] | [x] | |
 | V1-H09 | `mixed_p2wpkh_p2tr_2in_2out` | Mixed | [x] | [ ] | [x] | [x] | **TRUE** mixed: P2WPKH+P2TR inputs (merged from Sparrow legs; no single Sparrow-signed) |
+| V1-H10 | `p2tr_script_path_synthetic` | P2TR script-path | [x] | [ ] | [ ] | [x] | v0.2 synthetic leaf; `make test-scriptpath` |
 
 ### Medium / low (default harness)
 
@@ -94,6 +95,7 @@ Policy: **partial_sig only** for P2WSH in v0.1 (not full finalize).
 | ID    | Filename                              | Script Type          | U | S | F | V | Notes |
 |-------|---------------------------------------|----------------------|---|---|---|---|-------|
 | V3-01 | true mixed p2wpkh+p2tr                | Mixed                | [x] | [ ] | [x] | [x] | Promoted to V1-H09; legs in `mixed-leg-p2wpkh` / `mixed-leg-p2tr` |
+| V1-H10 | `p2tr_script_path_synthetic` | P2TR script-path | [x] | [ ] | [ ] | [x] | v0.2 synthetic leaf; `make test-scriptpath` |
 | V3-02 | v3_mixed_p2wpkh_p2wsh_2in_2out        | Mixed                | [ ] | [ ] | [ ] | [ ] | |
 | V3-03 | v3_p2tr_script_path_simple            | P2TR Script-path     | [ ] | [ ] | [ ] | [ ] | need leaf+control block fixtures |
 | V3-04 | v3_ark_boarding_basic                 | Ark Boarding         | [ ] | [ ] | [ ] | [ ] | |

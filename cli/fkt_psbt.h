@@ -30,10 +30,15 @@
 #define FKT_PSBT_IN_BIP32_DERIVATION      0x06
 #define FKT_PSBT_IN_FINAL_SCRIPTSIG       0x07
 #define FKT_PSBT_IN_FINAL_SCRIPTWITNESS   0x08
+#define FKT_PSBT_IN_TAP_LEAF_SCRIPT       0x15
 #define FKT_PSBT_IN_TAP_BIP32_DERIVATION  0x16
 #define FKT_PSBT_IN_TAP_INTERNAL_KEY      0x17
 #define FKT_PSBT_IN_TAP_MERKLE_ROOT       0x18
 #define FKT_PSBT_IN_PROPRIETARY           0xFC
+
+/* Control block: leaf_version|parity (1) + internal key (32) + up to 8 merkle nodes */
+#define FKT_TAP_CONTROL_BLOCK_MAX         (1 + 32 + 32 * 8)
+#define FKT_TAP_LEAF_SCRIPT_MAX           520
 
 /* output map key types */
 #define FKT_PSBT_OUT_WITNESS_SCRIPT       0x00
@@ -81,6 +86,15 @@ typedef struct {
     int      input_has_sighash [MAX_PSBT_ITEMS];
     int      input_has_tap_int_key [MAX_PSBT_ITEMS];
     uint8_t  input_tap_int_key     [MAX_PSBT_ITEMS][32];
+    int      input_has_tap_merkle_root [MAX_PSBT_ITEMS];
+    uint8_t  input_tap_merkle_root     [MAX_PSBT_ITEMS][32];
+    int      input_has_tap_leaf    [MAX_PSBT_ITEMS];
+    uint8_t  input_tap_leaf_script [MAX_PSBT_ITEMS][FKT_TAP_LEAF_SCRIPT_MAX];
+    size_t   input_tap_leaf_script_len [MAX_PSBT_ITEMS];
+    uint8_t  input_tap_leaf_version [MAX_PSBT_ITEMS];
+    uint8_t  input_tap_control_block [MAX_PSBT_ITEMS][FKT_TAP_CONTROL_BLOCK_MAX];
+    size_t   input_tap_control_block_len [MAX_PSBT_ITEMS];
+    int      input_is_script_path  [MAX_PSBT_ITEMS]; /* 1 = sign via script-path */
     uint8_t  input_witness_script     [MAX_PSBT_ITEMS][520];
     size_t   input_witness_script_len [MAX_PSBT_ITEMS];
     int      input_has_witness_script [MAX_PSBT_ITEMS];

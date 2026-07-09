@@ -401,40 +401,111 @@ static int fkt_sign_loaded_psbt(const uint8_t seed[64],
             uint8_t sighash[32];
             uint8_t sig[64];
             int sig_len;
-            uint8_t witness[66];
-
             uint8_t tap_int_key[32];
             int has_tap_int_key = psbt_data.input_has_tap_int_key[i];
+            int is_script_path = psbt_data.input_is_script_path[i];
 
             fkt_remove_input_key_type(i, 0x03);
             fkt_remove_input_key_type(i, 0x16);
+            fkt_remove_input_key_type(i, FKT_PSBT_IN_TAP_LEAF_SCRIPT);
+            fkt_remove_input_key_type(i, FKT_PSBT_IN_TAP_MERKLE_ROOT);
             if (has_tap_int_key) {
                 memcpy(tap_int_key, psbt_data.input_tap_int_key[i], 32);
                 fkt_remove_input_key_type(i, FKT_PSBT_IN_TAP_INTERNAL_KEY);
             }
 
-            if (fkt_bip341_sighash(i, sighash) != 0) {
-                printf("Sighash error for input %d (Taproot)\n", i);
-                goto cleanup;
-            }
-            fkt_debug_hex("sighash", sighash, 32);
+            if (is_script_path) {
+                /* Script-path: untweaked schnorr + [sig, script, control_block] */
+                uint8_t witness[1 + 1 + 64 + 1 + FKT_TAP_LEAF_SCRIPT_MAX + 1 + FKT_TAP_CONTROL_BLOCK_MAX];
+                uint8_t *wp;
+                size_t wlen;
+                size_t script_len = psbt_data.input_tap_leaf_script_len[i];
+                size_t cb_len = psbt_data.input_tap_control_block_len[i];
 
-            if (fkt_schnorr_sign_taproot(child_priv, sighash, NULL, 0, sig, &sig_len) != 0) {
-                printf("Schnorr signing failed for input %d\n", i);
-                goto cleanup;
-            }
-            fkt_debug_hex("schnorr sig", sig, 64);
+                if (!psbt_data.input_has_tap_leaf[i] || script_len == 0 || cb_len < 33) {
+                    printf("Script-path data incomplete for input %d\n", i);
+                    goto cleanup;
+                }
+                if (fkt_bip341_sighash_scriptpath(i, sighash) != 0) {
+                    printf("Sighash error for input %d (Taproot script-path)\n", i);
+                    goto cleanup;
+                }
+                fkt_debug_hex("sighash scriptpath", sighash, 32);
+                if (fkt_schnorr_sign(child_priv, sighash, sig, &sig_len) != 0) {
+                    printf("Schnorr script-path signing failed for input %d\n", i);
+                    goto cleanup;
+                }
+                fkt_debug_hex("schnorr sig scriptpath", sig, 64);
 
-            if (fkt_insert_input_key(i, 0x07, NULL, 0, NULL, 0) != 0) {
-                printf("PSBT buffer overflow inserting scriptsig for input %d\n", i);
-                goto cleanup;
-            }
-            witness[0] = 0x01;
-            witness[1] = 64;
-            memcpy(witness + 2, sig, 64);
-            if (fkt_insert_input_key(i, 0x08, NULL, 0, witness, 66) != 0) {
-                printf("PSBT buffer overflow inserting witness stack for input %d\n", i);
-                goto cleanup;
+                if (fkt_insert_input_key(i, 0x07, NULL, 0, NULL, 0) != 0) {
+                    printf("PSBT buffer overflow inserting scriptsig for input %d\n", i);
+                    goto cleanup;
+                }
+                wp = witness;
+                *wp++ = 0x03; /* three stack items */
+                *wp++ = 64;
+                memcpy(wp, sig, 64); wp += 64;
+                if (script_len < 0xFDu) {
+                    *wp++ = (uint8_t)script_len;
+                } else {
+                    printf("Leaf script too long for compact size encoding\n");
+                    goto cleanup;
+                }
+                memcpy(wp, psbt_data.input_tap_leaf_script[i], script_len);
+                wp += script_len;
+                if (cb_len < 0xFDu) {
+                    *wp++ = (uint8_t)cb_len;
+                } else if (cb_len <= 0xFFFFu) {
+                    *wp++ = 0xFD;
+                    *wp++ = (uint8_t)(cb_len & 0xFF);
+                    *wp++ = (uint8_t)((cb_len >> 8) & 0xFF);
+                } else {
+                    printf("Control block too long\n");
+                    goto cleanup;
+                }
+                memcpy(wp, psbt_data.input_tap_control_block[i], cb_len);
+                wp += cb_len;
+                wlen = (size_t)(wp - witness);
+                if (fkt_insert_input_key(i, 0x08, NULL, 0, witness, wlen) != 0) {
+                    printf("PSBT buffer overflow inserting script-path witness for input %d\n", i);
+                    goto cleanup;
+                }
+            } else {
+                /* Key-path: tweaked schnorr (no merkle in tweak when root absent) */
+                uint8_t witness[66];
+                const uint8_t *merkle = NULL;
+                size_t merkle_len = 0;
+
+                if (psbt_data.input_has_tap_merkle_root[i]) {
+                    /* Should not happen without leaf (parser rejects); if it does, keypath with tweak */
+                    merkle = psbt_data.input_tap_merkle_root[i];
+                    merkle_len = 32;
+                }
+
+                if (fkt_bip341_sighash(i, sighash) != 0) {
+                    printf("Sighash error for input %d (Taproot)\n", i);
+                    goto cleanup;
+                }
+                fkt_debug_hex("sighash", sighash, 32);
+
+                if (fkt_schnorr_sign_taproot(child_priv, sighash, merkle, merkle_len,
+                                             sig, &sig_len) != 0) {
+                    printf("Schnorr signing failed for input %d\n", i);
+                    goto cleanup;
+                }
+                fkt_debug_hex("schnorr sig", sig, 64);
+
+                if (fkt_insert_input_key(i, 0x07, NULL, 0, NULL, 0) != 0) {
+                    printf("PSBT buffer overflow inserting scriptsig for input %d\n", i);
+                    goto cleanup;
+                }
+                witness[0] = 0x01;
+                witness[1] = 64;
+                memcpy(witness + 2, sig, 64);
+                if (fkt_insert_input_key(i, 0x08, NULL, 0, witness, 66) != 0) {
+                    printf("PSBT buffer overflow inserting witness stack for input %d\n", i);
+                    goto cleanup;
+                }
             }
             if (has_tap_int_key) {
                 if (fkt_insert_input_key(i, FKT_PSBT_IN_TAP_INTERNAL_KEY, NULL, 0, tap_int_key, 32) != 0) {
