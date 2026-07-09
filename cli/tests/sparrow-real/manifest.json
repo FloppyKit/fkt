@@ -1,0 +1,544 @@
+{
+  "schema_version": 1,
+  "name": "fkt-sparrow-real-v1",
+  "description": "Real Sparrow PSBT golden matrix for FKT Ice Cold / Warm CLI signing validation (testnet only).",
+  "network": "testnet",
+  "layout": {
+    "unsigned": "unsigned/",
+    "sparrow_signed": "sparrow-signed/",
+    "fkt_signed": "fkt-signed/",
+    "legacy_unsigned": "Unsigned/v1/",
+    "legacy_signed": "Signed/v1/"
+  },
+  "policy": {
+    "p2sh_p2wpkh": "sign_if_key_matches",
+    "p2wsh": "partial_sig_only",
+    "p2tr_script_path": "reject_until_0.2",
+    "notes": "Nested P2SH-P2WPKH: sign when BIP32 paths match seed. P2WSH: partial_sig only (not fully supported). Script-path Taproot: hard reject until script-path build (0.2)."
+  },
+  "seeds": {
+    "call_release": {
+      "kind": "bip39",
+      "ref": "cli/tests/TEST_SEEDS.md",
+      "env": "FKT_SEED_CALL_RELEASE",
+      "usage": "New P2WPKH exports, all prior Taproot key-path, mixed p2wpkh+p2tr, script-path fixtures"
+    },
+    "nested_reward_parade": {
+      "kind": "bip39",
+      "ref": "cli/tests/TEST_SEEDS.md",
+      "env": "FKT_SEED_NESTED",
+      "usage": "Nested P2SH-P2WPKH Sparrow exports"
+    },
+    "legacy_p2wpkh_hex": {
+      "kind": "bip32_seed_hex",
+      "ref": "cli/tests/test_sparrow_real.py SEEDS[v1_p2wpkh]",
+      "env": "FKT_SEED_LEGACY_P2WPKH_HEX",
+      "usage": "Older v1_p2wpkh_* Sparrow exports (hex BIP32 seed, not mnemonic in TEST_SEEDS)",
+      "note": "Do not invent a mnemonic; harness uses existing hex until re-export under call_release"
+    },
+    "unknown": {
+      "kind": "unknown",
+      "ref": null,
+      "env": null,
+      "usage": "Multisig / partial fixtures \u2014 document seed when productized"
+    }
+  },
+  "cases": [
+    {
+      "id": "p2wpkh_1in_1out",
+      "unsigned": "unsigned/p2wpkh_1in_1out.psbt",
+      "sparrow_signed": "sparrow-signed/p2wpkh_1in_1out.psbt",
+      "fkt_signed": "fkt-signed/p2wpkh_1in_1out.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "high",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2wpkh_1in_1out.psbt",
+        "signed": "Signed/v1/v1_p2wpkh_1in_1out.psbt"
+      },
+      "notes": "BIP84 baseline; older Sparrow export"
+    },
+    {
+      "id": "p2wpkh_2in_2out",
+      "unsigned": "unsigned/p2wpkh_2in_2out.psbt",
+      "sparrow_signed": "sparrow-signed/p2wpkh_2in_2out.psbt",
+      "fkt_signed": "fkt-signed/p2wpkh_2in_2out.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "high",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2wpkh_2in_2out.psbt",
+        "signed": "Signed/v1/v1_p2wpkh_2in_2out.psbt"
+      },
+      "notes": "Multi-input + change"
+    },
+    {
+      "id": "p2wpkh_rbf",
+      "unsigned": "unsigned/p2wpkh_rbf.psbt",
+      "sparrow_signed": "sparrow-signed/p2wpkh_rbf.psbt",
+      "fkt_signed": "fkt-signed/p2wpkh_rbf.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "high",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2wpkh_rbf.psbt",
+        "signed": "Signed/v1/v1_p2wpkh_rbf.psbt"
+      },
+      "notes": "RBF enabled"
+    },
+    {
+      "id": "p2wpkh_locktime",
+      "unsigned": "unsigned/p2wpkh_locktime.psbt",
+      "sparrow_signed": "sparrow-signed/p2wpkh_locktime.psbt",
+      "fkt_signed": "fkt-signed/p2wpkh_locktime.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "high",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2wpkh_locktime.psbt",
+        "signed": "Signed/v1/v1_p2wpkh_locktime.psbt"
+      },
+      "notes": "Non-zero locktime"
+    },
+    {
+      "id": "p2wpkh_with_change",
+      "unsigned": "unsigned/p2wpkh_with_change.psbt",
+      "sparrow_signed": "sparrow-signed/p2wpkh_with_change.psbt",
+      "fkt_signed": "fkt-signed/p2wpkh_with_change.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "high",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2wpkh_2in_2out.psbt",
+        "signed": "Signed/v1/v1_p2wpkh_2in_2out.psbt"
+      },
+      "notes": "Alias of 2in_2out for with_change coverage (no dedicated file)"
+    },
+    {
+      "id": "p2tr_1in_1out",
+      "unsigned": "unsigned/p2tr_1in_1out.psbt",
+      "sparrow_signed": "sparrow-signed/p2tr_1in_1out.psbt",
+      "fkt_signed": "fkt-signed/p2tr_1in_1out.psbt",
+      "expect": "sign",
+      "script": "p2tr",
+      "priority": "high",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2tr_1in_1out.psbt",
+        "signed": "Signed/v1/v1_p2tr_1in_1out.psbt"
+      },
+      "notes": "BIP86 key-path baseline; seed = call release..."
+    },
+    {
+      "id": "p2tr_2in_2out",
+      "unsigned": "unsigned/p2tr_2in_2out.psbt",
+      "sparrow_signed": "sparrow-signed/p2tr_2in_2out.psbt",
+      "fkt_signed": "fkt-signed/p2tr_2in_2out.psbt",
+      "expect": "sign",
+      "script": "p2tr",
+      "priority": "high",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2tr_2in_2out.psbt",
+        "signed": "Signed/v1/v1_p2tr_2in_2out.psbt"
+      },
+      "notes": "Multi-input Taproot key-path"
+    },
+    {
+      "id": "p2tr_rbf",
+      "unsigned": "unsigned/p2tr_rbf.psbt",
+      "sparrow_signed": "sparrow-signed/p2tr_rbf.psbt",
+      "fkt_signed": "fkt-signed/p2tr_rbf.psbt",
+      "expect": "sign",
+      "script": "p2tr",
+      "priority": "high",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2tr_rbf.psbt",
+        "signed": "Signed/v1/v1_p2tr_rbf.psbt"
+      },
+      "notes": "RBF + Taproot key-path"
+    },
+    {
+      "id": "mixed_p2wpkh_p2tr_2in_2out",
+      "unsigned": "unsigned/mixed_p2wpkh_p2tr_2in_2out.psbt",
+      "sparrow_signed": "sparrow-signed/mixed_p2wpkh_p2tr_2in_2out.psbt",
+      "fkt_signed": "fkt-signed/mixed_p2wpkh_p2tr_2in_2out.psbt",
+      "expect": "sign",
+      "script": "mixed_p2wpkh_p2tr",
+      "priority": "high",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out.psbt",
+        "signed": "Signed/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-signed.psbt"
+      },
+      "notes": "CRITICAL mixed inputs; fingerprint 9581fdb1 (call release)"
+    },
+    {
+      "id": "p2wpkh_3in_1out",
+      "unsigned": "unsigned/p2wpkh_3in_1out.psbt",
+      "sparrow_signed": "sparrow-signed/p2wpkh_3in_1out.psbt",
+      "fkt_signed": "fkt-signed/p2wpkh_3in_1out.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "medium",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2wpkh_3in_1out.psbt",
+        "signed": "Signed/v1/v1_p2wpkh_3in_1out.psbt"
+      },
+      "notes": "Consolidation 3in->1out"
+    },
+    {
+      "id": "p2wpkh_high_locktime",
+      "unsigned": "unsigned/p2wpkh_high_locktime.psbt",
+      "sparrow_signed": "sparrow-signed/p2wpkh_high_locktime.psbt",
+      "fkt_signed": "fkt-signed/p2wpkh_high_locktime.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "medium",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2wpkh_high_locktime.psbt",
+        "signed": "Signed/v1/v1_p2wpkh_high_locktime.psbt"
+      },
+      "notes": "Very high locktime"
+    },
+    {
+      "id": "p2tr_with_change",
+      "unsigned": "unsigned/p2tr_with_change.psbt",
+      "sparrow_signed": "sparrow-signed/p2tr_with_change.psbt",
+      "fkt_signed": "fkt-signed/p2tr_with_change.psbt",
+      "expect": "sign",
+      "script": "p2tr",
+      "priority": "medium",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2tr_2in_2out.psbt",
+        "signed": "Signed/v1/v1_p2tr_2in_2out.psbt"
+      },
+      "notes": "Alias of p2tr_2in_2out for change coverage"
+    },
+    {
+      "id": "p2sh_p2wpkh_1in_1out",
+      "unsigned": "unsigned/p2sh_p2wpkh_1in_1out.psbt",
+      "sparrow_signed": "sparrow-signed/p2sh_p2wpkh_1in_1out.psbt",
+      "fkt_signed": "fkt-signed/p2sh_p2wpkh_1in_1out.psbt",
+      "expect": "sign",
+      "script": "p2sh_p2wpkh",
+      "priority": "medium",
+      "seed_ref": "nested_reward_parade",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-nested-p2sh-p2wpkh-unsigned.psbt",
+        "signed": "Signed/v1/sparrow-nested-p2sh-p2wpkh-signed.psbt"
+      },
+      "notes": "Nested SegWit; policy=sign if key matches (code can)"
+    },
+    {
+      "id": "p2wsh_2of3_clean",
+      "unsigned": "unsigned/p2wsh_2of3_clean.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/p2wsh_2of3_clean.psbt",
+      "expect": "partial_sig",
+      "script": "p2wsh",
+      "priority": "medium",
+      "seed_ref": "unknown",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2wsh_2of3_clean.psbt",
+        "signed": null
+      },
+      "notes": "Multisig partial-sig only; not full finalize in v0.1"
+    },
+    {
+      "id": "p2tr_script_path",
+      "unsigned": "unsigned/p2tr_script_path.psbt",
+      "sparrow_signed": "sparrow-signed/p2tr_script_path.psbt",
+      "fkt_signed": "fkt-signed/p2tr_script_path.psbt",
+      "expect": "reject",
+      "script": "p2tr_script_path",
+      "priority": "low",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-taproot-scriptpath-unsigned.psbt",
+        "signed": "Signed/v1/sparrow-taproot-scriptpath-signed.psbt"
+      },
+      "notes": "v0.1 hard-aborts on TAP_MERKLE_ROOT/script-path (0x18); keep reject until 0.2"
+    },
+    {
+      "id": "p2wpkh_dust",
+      "unsigned": "unsigned/p2wpkh_dust.psbt",
+      "sparrow_signed": "sparrow-signed/p2wpkh_dust.psbt",
+      "fkt_signed": "fkt-signed/p2wpkh_dust.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "bonus",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2wpkh_dust.psbt",
+        "signed": "Signed/v1/v1_p2wpkh_dust.psbt"
+      },
+      "notes": "Dust output"
+    },
+    {
+      "id": "p2tr_dust",
+      "unsigned": "unsigned/p2tr_dust.psbt",
+      "sparrow_signed": "sparrow-signed/p2tr_dust.psbt",
+      "fkt_signed": "fkt-signed/p2tr_dust.psbt",
+      "expect": "sign",
+      "script": "p2tr",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2tr_dust.psbt",
+        "signed": "Signed/v1/v1_p2tr_dust.psbt"
+      },
+      "notes": "Dust Taproot"
+    },
+    {
+      "id": "p2tr_locktime",
+      "unsigned": "unsigned/p2tr_locktime.psbt",
+      "sparrow_signed": "sparrow-signed/p2tr_locktime.psbt",
+      "fkt_signed": "fkt-signed/p2tr_locktime.psbt",
+      "expect": "sign",
+      "script": "p2tr",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2tr_locktime.psbt",
+        "signed": "Signed/v1/v1_p2tr_locktime.psbt"
+      },
+      "notes": "Locktime Taproot"
+    },
+    {
+      "id": "p2tr_minimal_fee",
+      "unsigned": "unsigned/p2tr_minimal_fee.psbt",
+      "sparrow_signed": "sparrow-signed/p2tr_minimal_fee.psbt",
+      "fkt_signed": "fkt-signed/p2tr_minimal_fee.psbt",
+      "expect": "sign",
+      "script": "p2tr",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_p2tr_minimal_fee.psbt",
+        "signed": "Signed/v1/v1_p2tr_minimal_fee.psbt"
+      },
+      "notes": "Minimal fee Taproot"
+    },
+    {
+      "id": "multi_input_signs_index1",
+      "unsigned": "unsigned/multi_input_signs_index1.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/multi_input_signs_index1.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "bonus",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_multi_input_signs_index1.psbt",
+        "signed": null
+      },
+      "notes": "Sign only index 1"
+    },
+    {
+      "id": "nonwitness_utxo_mixed",
+      "unsigned": "unsigned/nonwitness_utxo_mixed.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/nonwitness_utxo_mixed.psbt",
+      "expect": "sign",
+      "script": "mixed",
+      "priority": "bonus",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_nonwitness_utxo_mixed.psbt",
+        "signed": null
+      },
+      "notes": "Non-witness UTXO present"
+    },
+    {
+      "id": "partial_sig",
+      "unsigned": "unsigned/partial_sig.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/partial_sig.psbt",
+      "expect": "partial_sig",
+      "script": "p2wpkh",
+      "priority": "bonus",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/v1_partial_sig.psbt.psbt",
+        "signed": null
+      },
+      "notes": "Already has partial sig"
+    },
+    {
+      "id": "mixed_p2wpkh_p2tr_2in_2out_rbf_off",
+      "unsigned": "unsigned/mixed_p2wpkh_p2tr_2in_2out_rbf_off.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/mixed_p2wpkh_p2tr_2in_2out_rbf_off.psbt",
+      "expect": "sign",
+      "script": "mixed_p2wpkh_p2tr",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-rbf-off.psbt",
+        "signed": null
+      },
+      "notes": "RBF off variant"
+    },
+    {
+      "id": "mixed_p2wpkh_p2tr_2in_2out_locktime_on",
+      "unsigned": "unsigned/mixed_p2wpkh_p2tr_2in_2out_locktime_on.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/mixed_p2wpkh_p2tr_2in_2out_locktime_on.psbt",
+      "expect": "sign",
+      "script": "mixed_p2wpkh_p2tr",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-locktime-on.psbt",
+        "signed": null
+      },
+      "notes": "Locktime on variant"
+    },
+    {
+      "id": "mixed_p2wpkh_p2tr_2in_2out_all_anyonecanpay",
+      "unsigned": "unsigned/mixed_p2wpkh_p2tr_2in_2out_all_anyonecanpay.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/mixed_p2wpkh_p2tr_2in_2out_all_anyonecanpay.psbt",
+      "expect": "sign",
+      "script": "mixed_p2wpkh_p2tr",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-all-anyonecanpay.psbt",
+        "signed": null
+      },
+      "notes": "SIGHASH_ANYONECANPAY all inputs"
+    },
+    {
+      "id": "p2sh_p2wpkh_rbf_off",
+      "unsigned": "unsigned/p2sh_p2wpkh_rbf_off.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/p2sh_p2wpkh_rbf_off.psbt",
+      "expect": "sign",
+      "script": "p2sh_p2wpkh",
+      "priority": "bonus",
+      "seed_ref": "nested_reward_parade",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-nested-p2sh-p2wpkh-rbf-off-unsigned.psbt",
+        "signed": null
+      },
+      "notes": "Nested RBF off"
+    },
+    {
+      "id": "p2sh_p2wpkh_locktime_on",
+      "unsigned": "unsigned/p2sh_p2wpkh_locktime_on.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/p2sh_p2wpkh_locktime_on.psbt",
+      "expect": "sign",
+      "script": "p2sh_p2wpkh",
+      "priority": "bonus",
+      "seed_ref": "nested_reward_parade",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-nested-p2sh-p2wpkh-locktime-on-unsigned.psbt",
+        "signed": null
+      },
+      "notes": "Nested locktime on"
+    },
+    {
+      "id": "p2sh_p2wpkh_all_anyonecanpay",
+      "unsigned": "unsigned/p2sh_p2wpkh_all_anyonecanpay.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/p2sh_p2wpkh_all_anyonecanpay.psbt",
+      "expect": "sign",
+      "script": "p2sh_p2wpkh",
+      "priority": "bonus",
+      "seed_ref": "nested_reward_parade",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-nested-p2sh-p2wpkh-all-anyonepay-unsigned.psbt",
+        "signed": null
+      },
+      "notes": "Nested ANYONECANPAY"
+    },
+    {
+      "id": "p2tr_script_path_rbf_no",
+      "unsigned": "unsigned/p2tr_script_path_rbf_no.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/p2tr_script_path_rbf_no.psbt",
+      "expect": "reject",
+      "script": "p2tr_script_path",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-taproot-scriptpath-rbf-no-unsigned.psbt",
+        "signed": null
+      },
+      "notes": "Script-path RBF off; reject until 0.2"
+    },
+    {
+      "id": "p2tr_script_path_locktime_on",
+      "unsigned": "unsigned/p2tr_script_path_locktime_on.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/p2tr_script_path_locktime_on.psbt",
+      "expect": "reject",
+      "script": "p2tr_script_path",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-taproot-scriptpath-locktime-on-unsigned.psbt",
+        "signed": null
+      },
+      "notes": "Script-path locktime; reject until 0.2"
+    },
+    {
+      "id": "p2tr_script_path_anyonecanpay",
+      "unsigned": "unsigned/p2tr_script_path_anyonecanpay.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/p2tr_script_path_anyonecanpay.psbt",
+      "expect": "reject",
+      "script": "p2tr_script_path",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "legacy_source": {
+        "unsigned": "Unsigned/v1/sparrow-taproot-scriptpath-anyonepay-unsigned.psbt",
+        "signed": null
+      },
+      "notes": "Script-path ANYONECANPAY; reject until 0.2"
+    }
+  ]
+}
