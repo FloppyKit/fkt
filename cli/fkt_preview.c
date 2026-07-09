@@ -68,32 +68,64 @@ static void print_hex_full(const uint8_t *buf, size_t len) {
         printf("%02x", buf[i]);
 }
 
-/* One address/program per line (no wrap mid-hex on 80-col DOS). */
+/* One address/program per line. Compact labels so v1_tap (64 hex) fits 80-col. */
 static void print_output_program_line(const uint8_t *spk, size_t len) {
     int col = fkt_ui_body_col();
+    int cols = fkt_ui_term_cols();
     int j;
+    const char *label;
+    const uint8_t *hex;
+    size_t hex_len;
+    int need;
+    int start_col;
+
+    if (len == 22 && spk[0] == 0x00 && spk[1] == 0x14) {
+        label = "v0_pkh:";
+        hex = spk + 2;
+        hex_len = 20;
+    } else if (len == 34 && spk[0] == 0x51 && spk[1] == 0x20) {
+        label = "v1_tap:";
+        hex = spk + 2;
+        hex_len = 32;
+    } else if (len >= 23 && spk[0] == 0xa9 && spk[1] == 0x14) {
+        label = "p2sh:";
+        hex = spk + 2;
+        hex_len = 20;
+    } else if (len >= 25 && spk[0] == 0x76 && spk[1] == 0xa9 && spk[2] == 0x14) {
+        label = "pkh:";
+        hex = spk + 3;
+        hex_len = 20;
+    } else if (len == 34 && spk[0] == 0x00 && spk[1] == 0x20) {
+        label = "v0_wsh:";
+        hex = spk + 2;
+        hex_len = 32;
+    } else {
+        label = NULL;
+        hex = spk;
+        hex_len = len > 32 ? 32 : len;
+    }
+
+    /* label + 2*hex_len chars; fit under body indent when possible. */
+    if (label)
+        need = (int)strlen(label) + (int)(hex_len * 2);
+    else
+        need = 12 + (int)(hex_len * 2); /* "script_NNB:" worst-ish */
+
+    start_col = col;
+    if (cols > 0 && start_col + need - 1 > cols)
+        start_col = 1; /* use full width so longer programs do not wrap */
+    if (cols > 0 && start_col + need - 1 > cols)
+        start_col = 1;
 
     preview_color();
-    for (j = 1; j < col + 4; j++)
+    for (j = 1; j < start_col; j++)
         putchar(' ');
-    if (len == 22 && spk[0] == 0x00 && spk[1] == 0x14) {
-        fputs("addr v0_pkh:", stdout);
-        print_hex_full(spk + 2, 20);
-    } else if (len == 34 && spk[0] == 0x51 && spk[1] == 0x20) {
-        fputs("addr v1_tap:", stdout);
-        print_hex_full(spk + 2, 32);
-    } else if (len >= 23 && spk[0] == 0xa9 && spk[1] == 0x14) {
-        fputs("addr p2sh:", stdout);
-        print_hex_full(spk + 2, 20);
-    } else if (len >= 25 && spk[0] == 0x76 && spk[1] == 0xa9 && spk[2] == 0x14) {
-        fputs("addr pkh:", stdout);
-        print_hex_full(spk + 3, 20);
-    } else if (len == 34 && spk[0] == 0x00 && spk[1] == 0x20) {
-        fputs("addr v0_wsh:", stdout);
-        print_hex_full(spk + 2, 32);
+    if (label) {
+        fputs(label, stdout);
+        print_hex_full(hex, hex_len);
     } else {
         printf("script_%luB:", (unsigned long)len);
-        print_hex_full(spk, len > 32 ? 32 : len);
+        print_hex_full(spk, hex_len);
         if (len > 32)
             fputs("...", stdout);
     }
@@ -182,7 +214,21 @@ static void render_preview(void) {
                      ((uint32_t)psbt_data.raw_unsigned_tx[3] << 24);
     }
 
-    preview_body_printf("v0 (BIP-174) * TX v%u\n", (unsigned)tx_version);
+    /* Version + locktime/RBF on one line to free a row on short terminals. */
+    if (psbt_data.locktime > 0)
+        snprintf(lock_rbf, sizeof(lock_rbf),
+                 "v0 (BIP-174) * TX v%u * nLock %u* * RBF %s",
+                 (unsigned)tx_version,
+                 (unsigned)psbt_data.locktime,
+                 any_rbf() ? "YES" : "no");
+    else
+        snprintf(lock_rbf, sizeof(lock_rbf),
+                 "v0 (BIP-174) * TX v%u * nLock %u * RBF %s",
+                 (unsigned)tx_version,
+                 (unsigned)psbt_data.locktime,
+                 any_rbf() ? "YES" : "no");
+    /* locktime>0 marks active with trailing * on the nLock value. */
+    preview_body_printf("%s\n", lock_rbf);
 
     preview_body_printf("Unsigned txid:\n");
     {
@@ -194,18 +240,6 @@ static void render_preview(void) {
         print_txid_reversed(psbt_data.txid);
         putchar('\n');
     }
-
-    if (psbt_data.locktime > 0)
-        snprintf(lock_rbf, sizeof(lock_rbf),
-                 "nLockTime: %u (active) * RBF: %s",
-                 (unsigned)psbt_data.locktime,
-                 any_rbf() ? "YES (BIP125)" : "no");
-    else
-        snprintf(lock_rbf, sizeof(lock_rbf),
-                 "nLockTime: %u * RBF: %s",
-                 (unsigned)psbt_data.locktime,
-                 any_rbf() ? "YES (BIP125)" : "no");
-    preview_body_printf("%s\n", lock_rbf);
 
     preview_puts("");
     preview_puts("-- INPUTS --");
@@ -293,15 +327,16 @@ static void preview_draw_interactive_screen(void) {
     fkt_ui_clear_screen();
     fkt_psbt_preview_render();
     fkt_ui_body_puts("");
-    fkt_ui_body_puts("[Q] QR PSBT   [Enter] Exit");
+    fkt_ui_body_puts("[Q] QR PSBT   [?] Help   [Enter] Exit");
     fkt_ui_pin_session_footer();
     /* No input cursor on preview — key-driven only. */
     fkt_ui_set_input_pos(0, 0);
     fkt_screen_cursor_hide();
+    fkt_ui_set_redraw_cb(preview_draw_interactive_screen);
 }
 
 int fkt_psbt_preview(const char *psbt_path) {
-    char line[16];
+    int ch;
 
     if (!psbt_path || psbt_path[0] == '\0') {
         fprintf(stderr, "Preview: missing PSBT path.\n");
@@ -321,14 +356,24 @@ int fkt_psbt_preview(const char *psbt_path) {
 
     for (;;) {
         preview_draw_interactive_screen();
-        if (!fkt_ui_read_line(line, sizeof(line), 0))
+        ch = fkt_tty_read_key_once();
+        if (ch < 0 || ch == FKT_KEY_SPECIAL)
+            continue;
+        if (ch == 27 || ch == '\r' || ch == '\n')
             break;
-        if (line[0] == 'q' || line[0] == 'Q') {
+        if (ch == 'q' || ch == 'Q') {
             if (fkt_ui_show_qr_loaded_psbt() != 0)
                 fkt_ui_body_puts("[!] Could not encode PSBT as QR.");
             continue;
         }
-        break;
+        if (ch == '?' || ch == '!' || ch == '#') {
+            char hk[2];
+            hk[0] = (char)ch;
+            hk[1] = '\0';
+            if (fkt_ui_handle_hotkey(hk) == 2) /* FKT_UI_HK_MENU */
+                break;
+            continue;
+        }
     }
 
     fkt_ui_term_restore();

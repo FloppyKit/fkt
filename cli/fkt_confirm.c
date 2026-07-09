@@ -266,11 +266,58 @@ int fkt_confirm_before_sign_ui(void) {
     return 0;
 }
 
+/*
+ * Walk BIP-144/174 non-witness unsigned tx to the outputs section.
+ * IMPORTANT: never reuse the input-count varint slot for script lengths —
+ * that truncated multi-input txs and caused "Post-sign output verification failed."
+ */
+static int confirm_seek_outputs(const uint8_t **pcursor, const uint8_t *end,
+                                int *num_outputs_out) {
+    const uint8_t *cursor;
+    uint64_t n_in;
+    uint64_t n_out;
+    uint64_t script_len;
+    int i;
+
+    cursor = *pcursor;
+    if (end - cursor < 4)
+        return -1;
+    cursor += 4; /* version */
+
+    /* PSBT global unsigned_tx is non-witness; reject witness marker. */
+    if (end - cursor >= 2 && cursor[0] == 0x00 && cursor[1] == 0x01)
+        return -1;
+
+    if (!confirm_read_varint(&cursor, end, &n_in))
+        return -1;
+    if (n_in > 256)
+        return -1;
+    for (i = 0; i < (int)n_in; i++) {
+        if (end - cursor < 36)
+            return -1;
+        cursor += 36; /* prevout */
+        if (!confirm_read_varint(&cursor, end, &script_len))
+            return -1;
+        if ((size_t)(end - cursor) < (size_t)script_len)
+            return -1;
+        cursor += (size_t)script_len; /* scriptSig */
+        if (end - cursor < 4)
+            return -1;
+        cursor += 4; /* nSequence */
+    }
+    if (!confirm_read_varint(&cursor, end, &n_out))
+        return -1;
+    if (n_out > 256)
+        return -1;
+    *num_outputs_out = (int)n_out;
+    *pcursor = cursor;
+    return 0;
+}
+
 static int confirm_render_post_sign_outputs_tty(const uint8_t txid[32]) {
     const uint8_t *tx;
     const uint8_t *end;
     const uint8_t *cursor;
-    uint64_t count;
     uint64_t script_len;
     int64_t amount;
     int num_outputs;
@@ -280,29 +327,8 @@ static int confirm_render_post_sign_outputs_tty(const uint8_t txid[32]) {
     tx = psbt_data.raw_unsigned_tx;
     end = tx + psbt_data.unsigned_tx_len;
     cursor = tx;
-    if (end - cursor < 4)
+    if (confirm_seek_outputs(&cursor, end, &num_outputs) != 0)
         return -1;
-    cursor += 4;
-    if (end - cursor >= 2 && cursor[0] == 0x00 && cursor[1] == 0x01)
-        return -1;
-    if (!confirm_read_varint(&cursor, end, &count))
-        return -1;
-    for (i = 0; i < (int)count; i++) {
-        if (end - cursor < 36)
-            return -1;
-        cursor += 36;
-        if (!confirm_read_varint(&cursor, end, &count))
-            return -1;
-        if ((size_t)(end - cursor) < (size_t)count)
-            return -1;
-        cursor += (size_t)count;
-        if (end - cursor < 4)
-            return -1;
-        cursor += 4;
-    }
-    if (!confirm_read_varint(&cursor, end, &count))
-        return -1;
-    num_outputs = (int)count;
 
     printf("\nUnsigned txid: ");
     confirm_print_txid_reversed(txid);
@@ -334,7 +360,6 @@ static int confirm_render_post_sign_outputs_ui(const uint8_t txid[32]) {
     const uint8_t *tx;
     const uint8_t *end;
     const uint8_t *cursor;
-    uint64_t count;
     uint64_t script_len;
     int64_t amount;
     int num_outputs;
@@ -345,29 +370,8 @@ static int confirm_render_post_sign_outputs_ui(const uint8_t txid[32]) {
     tx = psbt_data.raw_unsigned_tx;
     end = tx + psbt_data.unsigned_tx_len;
     cursor = tx;
-    if (end - cursor < 4)
+    if (confirm_seek_outputs(&cursor, end, &num_outputs) != 0)
         return -1;
-    cursor += 4;
-    if (end - cursor >= 2 && cursor[0] == 0x00 && cursor[1] == 0x01)
-        return -1;
-    if (!confirm_read_varint(&cursor, end, &count))
-        return -1;
-    for (i = 0; i < (int)count; i++) {
-        if (end - cursor < 36)
-            return -1;
-        cursor += 36;
-        if (!confirm_read_varint(&cursor, end, &count))
-            return -1;
-        if ((size_t)(end - cursor) < (size_t)count)
-            return -1;
-        cursor += (size_t)count;
-        if (end - cursor < 4)
-            return -1;
-        cursor += 4;
-    }
-    if (!confirm_read_varint(&cursor, end, &count))
-        return -1;
-    num_outputs = (int)count;
 
     fkt_ui_body_puts("");
     fkt_ui_body_puts("Unsigned txid:");
@@ -423,6 +427,11 @@ static int confirm_post_sign_prompt(const char *output_file, int ui_mode) {
     fkt_sha256d(psbt_data.raw_unsigned_tx, psbt_data.unsigned_tx_len, txid);
 
     if (ui_mode) {
+        int body_col;
+        int conf_row;
+        int conf_col;
+        static const char conf_lab[] = "Type CONFIRM to write file: ";
+
         fkt_ui_clear_screen();
         fkt_ui_draw_banner(1);
         fkt_ui_draw_subtitle("CONFIRM WRITE");
@@ -431,16 +440,27 @@ static int confirm_post_sign_prompt(const char *output_file, int ui_mode) {
             return -1;
         }
         fkt_ui_body_puts("");
-        fkt_ui_body_printf("Write signed PSBT to:\n> %s\n", output_file);
+        /* '>' one space right of "PSBT to:" on the same line. */
+        fkt_ui_body_printf("Write signed PSBT to: > %s\n", output_file);
         fkt_ui_body_puts("");
-        fkt_ui_body_puts("Type CONFIRM to write file:");
+        body_col = fkt_ui_body_col();
+        conf_row = fkt_ui_term_rows() > 8 ? fkt_ui_term_rows() - 4 : 12;
+        conf_col = body_col + (int)strlen(conf_lab);
+        fkt_screen_clear_line(conf_row);
+        fkt_screen_goto(conf_row, body_col);
+        fputs(fkt_ui_green_str(), stdout);
+        fputs(conf_lab, stdout);
         fkt_ui_pin_session_footer();
+        /* Cursor one space past the label (already included in conf_lab). */
+        fkt_ui_set_input_pos(conf_row, conf_col);
+        fkt_screen_goto(conf_row, conf_col);
+        fkt_screen_cursor_show();
     } else {
         if (confirm_render_post_sign_outputs_tty(txid) != 0) {
             fkt_last_error_set("Post-sign output verification failed.");
             return -1;
         }
-        printf("\nWrite signed PSBT to: %s\n", output_file);
+        printf("\nWrite signed PSBT to: > %s\n", output_file);
         printf("\nType CONFIRM to write file: ");
         fflush(stdout);
     }

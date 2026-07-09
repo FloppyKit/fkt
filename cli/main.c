@@ -205,7 +205,13 @@ static int fkt_cli_run_sign(int argc, char **argv) {
         if (cerr && cerr[0] != '\0')
             fprintf(stderr, "%s\n", cerr);
         else
-            fprintf(stderr, "Signing failed.\n");
+            {
+                const char *err = fkt_last_error_get();
+                if (err && err[0])
+                    fprintf(stderr, "%s\n", err);
+                else
+                    fprintf(stderr, "Signing failed.\n");
+            }
         return 1;
     }
 
@@ -410,7 +416,13 @@ int main(int argc, char **argv) {
             return 1;
         }
         if (fkt_sign_psbt_with_parent(seed, argv[3], argv[5], argv[6], pub33) != 0) {
-            fprintf(stderr, "Signing failed.\n");
+            {
+                const char *err = fkt_last_error_get();
+                if (err && err[0])
+                    fprintf(stderr, "%s\n", err);
+                else
+                    fprintf(stderr, "Signing failed.\n");
+            }
             return 1;
         }
         fkt_cli_sign_success_interact(argv[6]);
@@ -442,7 +454,13 @@ int main(int argc, char **argv) {
             return 1;
         }
         if (fkt_sign_psbt(seed, argv[2], argv[3], argv[4]) != 0) {
-            fprintf(stderr, "Signing failed.\n");
+            {
+                const char *err = fkt_last_error_get();
+                if (err && err[0])
+                    fprintf(stderr, "%s\n", err);
+                else
+                    fprintf(stderr, "Signing failed.\n");
+            }
             return 1;
         }
         fkt_cli_sign_success_interact(argv[4]);

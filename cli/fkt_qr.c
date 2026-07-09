@@ -14,14 +14,20 @@ static int g_fkt_qr_modules = 0;
 
 static int fkt_qr_module_with_zone(int col, int row, int modules, int total);
 
-#define FKT_QR_UPSCALE_MAX  4
+#define FKT_QR_UPSCALE_MAX  8
 
 #if defined(FKT_ASCII_ONLY)
 #define FKT_QR_CH_DARK  "#"
+#define FKT_QR_CH_UPPER "#"
+#define FKT_QR_CH_LOWER "#"
 #define FKT_QR_USE_ANSI  0
+#define FKT_QR_USE_HALF  0
 #else
-#define FKT_QR_CH_DARK  "\xe2\x96\x88"
+#define FKT_QR_CH_DARK  "\xe2\x96\x88" /* █ full block */
+#define FKT_QR_CH_UPPER "\xe2\x96\x80" /* ▀ upper half */
+#define FKT_QR_CH_LOWER "\xe2\x96\x84" /* ▄ lower half */
 #define FKT_QR_USE_ANSI  1
+#define FKT_QR_USE_HALF  1
 #endif
 
 void fkt_qr_clear(void) {
@@ -104,6 +110,19 @@ static void fkt_qr_emit_ansi(FILE *fp, int dark) {
 }
 #endif
 
+/* Width-first: maximize module size even if the QR scrolls vertically. */
+static int fkt_qr_pick_upscale_w(int total, int max_w, int cell_w) {
+    int s;
+    int best;
+
+    best = 1;
+    for (s = 1; s <= FKT_QR_UPSCALE_MAX; s++) {
+        if (total * cell_w * s <= max_w)
+            best = s;
+    }
+    return best;
+}
+
 static int fkt_qr_pick_upscale(int total, int max_w, int max_h, int cell_w) {
     int s;
     int best;
@@ -114,6 +133,33 @@ static int fkt_qr_pick_upscale(int total, int max_w, int max_h, int cell_w) {
             best = s;
     }
     return best;
+}
+
+/* Half-block scale: each module is `scale` cols wide and `scale` half-rows tall
+ * (≈ square on typical 1:2 terminal cells). Char rows = ceil(total*scale/2). */
+static int fkt_qr_pick_half_scale(int total, int max_w, int max_h) {
+    int s;
+    int best;
+
+    best = 1;
+    for (s = 1; s <= FKT_QR_UPSCALE_MAX; s++) {
+        int line_w = total * s;
+        int line_h = (total * s + 1) / 2;
+        if (line_w <= max_w && line_h <= max_h)
+            best = s;
+    }
+    return best;
+}
+
+static void fkt_qr_emit_half(FILE *fp, int upper_dark, int lower_dark) {
+    if (upper_dark && lower_dark)
+        fputs(FKT_QR_CH_DARK, fp);
+    else if (upper_dark)
+        fputs(FKT_QR_CH_UPPER, fp);
+    else if (lower_dark)
+        fputs(FKT_QR_CH_LOWER, fp);
+    else
+        fputc(' ', fp);
 }
 
 static int fkt_qr_render_blocks(FILE *fp, int term_cols, int modules, int total,
@@ -162,6 +208,54 @@ static int fkt_qr_render_blocks(FILE *fp, int term_cols, int modules, int total,
             }
             fputc('\n', fp);
         }
+    }
+    return 0;
+}
+
+/* Half-block render: 2 module-rows per terminal row → larger on-screen QR. */
+static int fkt_qr_render_half(FILE *fp, int term_cols, int modules, int total,
+                              int scale, int body_rows) {
+    int line_w;
+    int line_h;
+    int pad;
+    int vpad;
+    int mr; /* module-row in scaled space */
+    int col;
+    int scaled = total * scale;
+
+    line_w = scaled;
+    line_h = (scaled + 1) / 2;
+    pad = (term_cols - line_w) / 2;
+    if (pad < 0)
+        pad = 0;
+    vpad = 0;
+    if (line_h < body_rows)
+        vpad = (body_rows - line_h) / 2;
+
+    for (mr = 0; mr < vpad; mr++)
+        fputc('\n', fp);
+
+    for (mr = 0; mr < scaled; mr += 2) {
+        int upper_mr = mr;
+        int lower_mr = mr + 1;
+
+        for (col = 0; col < pad; col++)
+            fputc(' ', fp);
+        for (col = 0; col < scaled; col++) {
+            int u_mod = upper_mr / scale;
+            int l_mod = lower_mr / scale;
+            int c_mod = col / scale;
+            int ud;
+            int ld;
+
+            ud = fkt_qr_module_with_zone(c_mod, u_mod, modules, total);
+            if (lower_mr < scaled)
+                ld = fkt_qr_module_with_zone(c_mod, l_mod, modules, total);
+            else
+                ld = 0;
+            fkt_qr_emit_half(fp, ud, ld);
+        }
+        fputc('\n', fp);
     }
     return 0;
 }
@@ -222,8 +316,12 @@ static int fkt_qr_render_body(FILE *fp, int term_cols, int term_rows, int term_m
     int max_w;
     int cell_w;
     int upscale;
+    int half_scale;
+    int use_half;
     int line_w;
     int line_h;
+    int area_full;
+    int area_half;
 
     modules = g_fkt_qr_modules;
     total = modules + (FKT_QR_QUIET_ZONE * 2);
@@ -237,7 +335,7 @@ static int fkt_qr_render_body(FILE *fp, int term_cols, int term_rows, int term_m
         return 0;
     }
 
-    header_rows = 6;
+    header_rows = 5;
     body_rows = term_rows - header_rows;
     if (body_rows < 8)
         body_rows = 8;
@@ -251,26 +349,56 @@ static int fkt_qr_render_body(FILE *fp, int term_cols, int term_rows, int term_m
         cell_w = 2;
 #endif
 
-    upscale = fkt_qr_pick_upscale(total, max_w, body_rows, cell_w);
-    line_w = total * cell_w * upscale;
-    line_h = total * upscale;
+    /* Prefer largest modules: width-first full blocks vs half-block fit. */
+    upscale = fkt_qr_pick_upscale_w(total, max_w, cell_w);
+    /* If height-limited fit is almost as large and fully on-screen, prefer it. */
+    {
+        int fit = fkt_qr_pick_upscale(total, max_w, body_rows, cell_w);
+        if (fit >= upscale)
+            upscale = fit;
+    }
+    half_scale = 1;
+    use_half = 0;
+#if FKT_QR_USE_HALF
+    half_scale = fkt_qr_pick_half_scale(total, max_w, body_rows);
+    /* Module "area" proxy: full uses cell_w*upscale^2; half uses scale^2 (square-ish). */
+    area_full = cell_w * upscale * upscale;
+    area_half = half_scale * half_scale * 2; /* half-block ≈ denser vertical */
+    if (area_half >= area_full && half_scale >= 1)
+        use_half = 1;
+    /* On short terminals, half-block always wins for scanability without scroll. */
+    if ((total * upscale > body_rows) && half_scale >= 1)
+        use_half = 1;
+#endif
+
+    if (use_half) {
+        line_w = total * half_scale;
+        line_h = (total * half_scale + 1) / 2;
+    } else {
+        line_w = total * cell_w * upscale;
+        line_h = total * upscale;
+    }
 
     fprintf(fp, "  QR version %d  |  %dx%d modules  |  +%d quiet zone\n",
             g_fkt_qr_version, modules, modules, FKT_QR_QUIET_ZONE);
     fprintf(fp, "  Terminal %dx%d  |  display %dx%d", term_cols, term_rows, line_w, line_h);
-    if (cell_w == 2)
+    if (use_half)
+        fprintf(fp, "  |  half-block");
+    else if (cell_w == 2)
         fprintf(fp, "  |  ansi square");
     else
         fprintf(fp, "  |  full block");
-    if (upscale > 1)
-        fprintf(fp, " %dx", upscale);
+    if ((use_half && half_scale > 1) || (!use_half && upscale > 1))
+        fprintf(fp, " %dx", use_half ? half_scale : upscale);
     fputc('\n', fp);
     if (line_h > body_rows)
         fprintf(fp, "  Scroll to see all %d rows, or shrink font until the full QR fits.\n", line_h);
-    fprintf(fp, "  Tip: enlarge font (Ctrl++) until the QR fills the screen.\n");
     fprintf(fp, "\n");
 
-    fkt_qr_render_blocks(fp, term_cols, modules, total, upscale, cell_w, body_rows);
+    if (use_half)
+        fkt_qr_render_half(fp, term_cols, modules, total, half_scale, body_rows);
+    else
+        fkt_qr_render_blocks(fp, term_cols, modules, total, upscale, cell_w, body_rows);
     return 0;
 }
 

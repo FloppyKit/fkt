@@ -250,9 +250,9 @@ static void pick_draw(const char *title, int selected, int list_top,
     fkt_screen_clear_line(list_row0 + list_rows + 1);
     fkt_screen_goto(list_row0 + list_rows + 1, 2);
     if (mouse_hint)
-        fputs("Up/Down Enter=open  click=open  T=type  Esc=back", stdout);
+        fputs("Up/Down Enter=open  click  T=type  M=more  Esc=menu", stdout);
     else
-        fputs("Up/Down Enter=open  T=type path  Esc=back", stdout);
+        fputs("Up/Down Enter=open  T=type path  M=more  Esc=menu", stdout);
 
     fkt_screen_recolor();
     fkt_screen_cursor_hide();
@@ -382,6 +382,15 @@ int fkt_pick_file(char *out, size_t out_len, const char *filter_ext,
             fkt_screen_cursor_show();
             out[0] = '\0';
             return 2;
+        }
+
+        /* More options (type / camera chooser) without Esc trapping. */
+        if (ch == 'm' || ch == 'M') {
+            if (mouse_on)
+                fkt_mouse_hide();
+            fkt_screen_cursor_show();
+            out[0] = '\0';
+            return 3;
         }
 
         if (ch == FKT_KEY_UP) {

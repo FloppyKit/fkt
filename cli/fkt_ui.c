@@ -805,17 +805,18 @@ static void ui_draw_main_menu(void) {
 static void ui_draw_load_psbt_screen(void) {
     char cwd[512];
     int body_col = fkt_ui_body_col();
-    int prompt_row = FKT_UI_BANNER_ROWS + 12;
+    /* Keep prompt high enough that paste never collides with footer. */
+    int prompt_row = FKT_UI_BANNER_ROWS + 7;
 
     fkt_ui_clear_screen();
     ui_draw_top_banner();
     fkt_ui_draw_subtitle("LOAD PSBT - TYPE PATH");
     if (getcwd(cwd, sizeof(cwd)) != NULL)
-        fkt_ui_body_printf("Working directory: %s\n\n", cwd);
+        fkt_ui_body_printf("Working directory: %s\n", cwd);
     else
-        fkt_ui_body_printf("Working directory: (unknown)\n\n");
+        fkt_ui_body_printf("Working directory: (unknown)\n");
     fkt_ui_body_printf("PSBT file path or paste base64:\n");
-    fkt_ui_body_printf("(Esc cancel  |  prefer Browse from previous screen)\n");
+    fkt_ui_body_printf("(Esc cancel  |  multi-line paste ok  |  Enter submits)\n");
     if (g_psbt_load_err[0])
         fkt_ui_body_printf("[!] %s\n", g_psbt_load_err);
     fkt_screen_clear_line(prompt_row);
@@ -847,20 +848,23 @@ static void ui_trim_line(char *s) {
 }
 
 static int ui_prompt_load_psbt_type(char *out, size_t out_len) {
-    ui_draw_load_psbt_screen();
-    if (!fkt_ui_read_line(out, out_len, 1))
-        return 0;
-    ui_trim_line(out);
-    if (out[0] == '\0')
-        return 0;
-    if (fkt_psbt_load_input(out) == 0) {
-        g_psbt_load_err[0] = '\0';
-        return 1;
+    /* Stay on this screen until load succeeds or user cancels (Esc). */
+    for (;;) {
+        ui_draw_load_psbt_screen();
+        if (!fkt_ui_read_line(out, out_len, 1))
+            return 0;
+        ui_trim_line(out);
+        if (out[0] == '\0')
+            return 0;
+        if (fkt_psbt_load_input(out) == 0) {
+            g_psbt_load_err[0] = '\0';
+            return 1;
+        }
+        strncpy(g_psbt_load_err, "Not a valid PSBT file or base64.",
+                sizeof(g_psbt_load_err) - 1);
+        g_psbt_load_err[sizeof(g_psbt_load_err) - 1] = '\0';
+        /* Loop: re-draw with error; do not bounce back to browse. */
     }
-    strncpy(g_psbt_load_err, "Not a valid PSBT file or base64.",
-            sizeof(g_psbt_load_err) - 1);
-    g_psbt_load_err[sizeof(g_psbt_load_err) - 1] = '\0';
-    return -1; /* failed, caller may retry */
 }
 
 static void ui_load_psbt_camera_fallback(void) {
@@ -884,12 +888,53 @@ static void ui_load_psbt_camera_fallback(void) {
     (void)fkt_tty_read_key_once();
 }
 
+/* Intermediate load chooser (kept for M=more from browse). Returns:
+ * 1 loaded ok, 0 cancel/back to menu, -1 re-browse. */
+static int ui_prompt_load_psbt_chooser(char *out, size_t out_len) {
+    int ch;
+
+    fkt_ui_clear_screen();
+    ui_draw_top_banner();
+    fkt_ui_draw_subtitle("LOAD PSBT");
+    fkt_ui_body_puts("[B] Browse files");
+    fkt_ui_body_puts("[T] Type path or paste Base64");
+    fkt_ui_body_puts("[C] Camera / QR (graceful fallback)");
+    fkt_ui_body_puts("[Esc] Cancel");
+    fkt_ui_pin_session_footer();
+    ch = fkt_tty_read_key_once();
+    if (ch == 27)
+        return 0;
+    if (ch == 't' || ch == 'T') {
+        int tr = ui_prompt_load_psbt_type(out, out_len);
+        if (tr == 1)
+            return 1;
+        if (tr == 0)
+            return 0;
+        return -1;
+    }
+    if (ch == 'c' || ch == 'C') {
+        char cap[FKT_PSBT_INPUT_MAX];
+        if (fkt_cam_capture_text(cap, sizeof(cap)) == 0) {
+            if (fkt_psbt_load_input(cap) == 0) {
+                strncpy(out, "(camera)", out_len - 1);
+                out[out_len - 1] = '\0';
+                return 1;
+            }
+        }
+        ui_load_psbt_camera_fallback();
+        return -1;
+    }
+    if (ch == 'b' || ch == 'B')
+        return -1;
+    return 0;
+}
+
 static int ui_prompt_load_psbt(char *out, size_t out_len) {
     for (;;) {
         int pr;
 
         g_psbt_load_err[0] = '\0';
-        /* Browse first (arrows + mouse). T=type  C=camera (graceful). */
+        /* Browse first (arrows + mouse). T=type  M=more  Esc=main menu. */
         pr = fkt_pick_file(out, out_len, ".psbt", "LOAD PSBT - BROWSE");
         if (pr == 1) {
             if (fkt_psbt_load_input(out) == 0) {
@@ -913,51 +958,18 @@ static int ui_prompt_load_psbt(char *out, size_t out_len) {
             int tr = ui_prompt_load_psbt_type(out, out_len);
             if (tr == 1)
                 return 1;
-            if (tr == 0)
-                return 0;
-            continue; /* invalid paste/path, re-browse */
+            return 0; /* cancel from type screen */
         }
-        /* Esc from browser: offer camera? No — cancel cleanly.
-         * Camera is available from type-path screen via hotkey note, or:
-         * re-open browse with C key handled inside pick? Add here as menu. */
-        {
-            /* After Esc, show one-shot chooser for T/C/Esc */
-            int ch;
-            fkt_ui_clear_screen();
-            ui_draw_top_banner();
-            fkt_ui_draw_subtitle("LOAD PSBT");
-            fkt_ui_body_puts("[B] Browse files");
-            fkt_ui_body_puts("[T] Type path or paste Base64");
-            fkt_ui_body_puts("[C] Camera / QR (graceful fallback)");
-            fkt_ui_body_puts("[Esc] Cancel");
-            fkt_ui_pin_session_footer();
-            ch = fkt_tty_read_key_once();
-            if (ch == 27)
+        if (pr == 3) {
+            int cr = ui_prompt_load_psbt_chooser(out, out_len);
+            if (cr == 1)
+                return 1;
+            if (cr == 0)
                 return 0;
-            if (ch == 't' || ch == 'T') {
-                int tr = ui_prompt_load_psbt_type(out, out_len);
-                if (tr == 1)
-                    return 1;
-                if (tr == 0)
-                    return 0;
-                continue;
-            }
-            if (ch == 'c' || ch == 'C') {
-                char cap[FKT_PSBT_INPUT_MAX];
-                if (fkt_cam_capture_text(cap, sizeof(cap)) == 0) {
-                    if (fkt_psbt_load_input(cap) == 0) {
-                        strncpy(out, "(camera)", out_len - 1);
-                        out[out_len - 1] = '\0';
-                        return 1;
-                    }
-                }
-                ui_load_psbt_camera_fallback();
-                continue;
-            }
-            if (ch == 'b' || ch == 'B')
-                continue;
-            return 0;
+            continue; /* re-browse */
         }
+        /* Esc from browser → straight back to main menu. */
+        return 0;
     }
 }
 
@@ -965,7 +977,7 @@ static void ui_draw_preview_screen(void) {
     fkt_ui_clear_screen();
     fkt_psbt_preview_render();
     fkt_ui_body_puts("");
-    fkt_ui_body_puts("[Q] QR PSBT   [Enter] Return");
+    fkt_ui_body_puts("[Q] QR PSBT   [?] Help   [Enter] Return");
     fkt_ui_pin_session_footer();
     /* No blinking cursor on preview (was shifting Fee rate layout). */
     g_ui_input_hidden = 1;
@@ -983,30 +995,38 @@ static void ui_redraw_sign_screen(void) {
 
 static void ui_draw_sign_screen(int done) {
     int body_col = fkt_ui_body_col();
-    int prompt_row = FKT_UI_BANNER_ROWS + 8;
+    int prompt_row = FKT_UI_BANNER_ROWS + 7;
+    /* "Filename: >" — '>' sits one space right of the label. */
+    static const char fname_lab[] = "Filename: > ";
+    int cursor_col = body_col + (int)strlen(fname_lab);
 
     fkt_ui_clear_screen();
     ui_draw_top_banner();
     fkt_ui_draw_subtitle("SIGN");
     if (!done) {
-        fkt_ui_body_printf("Output filename [press Enter for default]:\n");
-        fkt_ui_body_printf("default: %s\n", SIGN_DEFAULT_OUT);
+        fkt_ui_body_printf("default: %s  (Enter accepts default)\n",
+                           SIGN_DEFAULT_OUT);
+        fkt_ui_body_puts("");
         fkt_screen_clear_line(prompt_row);
+        fkt_screen_goto(prompt_row, body_col);
         fputs(ui_green(), stdout);
-        ui_put_hpad(UI_BODY_W);
-        fputs("> ", stdout);
+        fputs(fname_lab, stdout);
         fkt_ui_pin_session_footer();
-        fkt_ui_set_input_pos(prompt_row, body_col + 2);
-        ui_place_cursor(prompt_row, body_col + 2);
+        fkt_ui_set_input_pos(prompt_row, cursor_col);
+        ui_place_cursor(prompt_row, cursor_col);
         ui_show_cursor();
     } else {
-        fkt_ui_body_printf("Output filename:\n> %s\n", g_sign_out_path);
+        fkt_ui_body_printf("Filename: > %s\n", g_sign_out_path);
         fkt_ui_body_puts("");
         fkt_ui_body_puts("[OK] Signed PSBT written. Key material wiped.");
         fkt_ui_body_puts("");
         fkt_ui_body_puts("[Q] VGA/best QR   [A] ASCII QR   [Enter] Return");
         fkt_ui_pin_session_footer();
-        fkt_ui_set_input_pos(FKT_UI_BANNER_ROWS + 14, body_col);
+        /* Key-driven toggles — no blinking text cursor. */
+        g_ui_input_hidden = 1;
+        g_input_row = 0;
+        g_input_col = 0;
+        ui_hide_cursor();
     }
     g_ui_sign_screen_done = done;
     g_ui_redraw_cb = ui_redraw_sign_screen;
@@ -1014,15 +1034,27 @@ static void ui_draw_sign_screen(int done) {
 
 static void ui_fill_show_words(char out[MAX_WORDS][WORD_BUF], int *num_words) {
     int i;
+    int live = 0;
 
-    if (g_seed_loaded && g_session_num_words > 0) {
+    if (g_seed_loaded && g_session_num_words > 0 &&
+        g_session_words[0][0] != '\0') {
         *num_words = g_session_num_words;
         for (i = 0; i < g_session_num_words; i++) {
             strncpy(out[i], g_session_words[i], WORD_BUF - 1);
             out[i][WORD_BUF - 1] = '\0';
         }
-        return;
+        live = 1;
     }
+    if (live)
+        return;
+
+    /* Seed flag without words (wiped after successful sign) — show placeholder. */
+    if (g_seed_loaded && g_session_num_words > 0 &&
+        g_session_words[0][0] == '\0') {
+        g_seed_loaded = 0;
+        g_session_num_words = 0;
+    }
+
     *num_words = 24;
     for (i = 0; i < 24; i++) {
         strncpy(out[i], UI_DUMMY_WORDS[i], WORD_BUF - 1);
@@ -1044,7 +1076,7 @@ static void ui_draw_show_seed_screen(void) {
     fkt_ui_clear_screen();
     ui_draw_top_banner();
     fkt_ui_draw_subtitle("SEED " UI_EM_DASH " WRITE THIS DOWN");
-    fkt_ui_body_puts("SECURITY WARNING: Never share these words. Anyone with them");
+    fkt_ui_body_puts("SECURITY WARNING: Never share these words. Anyone who has them");
     fkt_ui_body_puts("can steal your funds. Write on paper and store offline.");
     fkt_ui_body_puts("");
     fkt_show_seed_grid(words, num_words);
@@ -1080,7 +1112,7 @@ static void ui_draw_generated_seed_screen(const char words[][WORD_BUF], int num_
     fkt_ui_clear_screen();
     ui_draw_top_banner();
     fkt_ui_draw_subtitle("GENERATED SEED " UI_EM_DASH " WRITE THIS DOWN");
-    fkt_ui_body_puts("SECURITY WARNING: Never share these words. Anyone with them");
+    fkt_ui_body_puts("SECURITY WARNING: Never share these words. Anyone who has them");
     fkt_ui_body_puts("can steal your funds. Write on paper and store offline.");
     fkt_ui_body_puts("");
     fkt_show_seed_grid(words, num_words);
@@ -1227,17 +1259,6 @@ static void ui_entropy_finalize(uint8_t *ent, int target_len) {
     ui_entropy_reset();
 }
 
-static int ui_wait_any_key(void) {
-    int ch;
-
-    ch = fkt_tty_read_key_once();
-    if (ch < 0)
-        return 0;
-    if (ch == 27)
-        return 1;
-    return 0;
-}
-
 static void help_emit_line(FILE *fp, int use_ui, const char *line) {
     if (use_ui)
         fkt_ui_body_puts(line);
@@ -1339,18 +1360,138 @@ int fkt_cli_sign_success_interact(const char *out_psbt) {
     return 0;
 }
 
+/* Scrollable help — absolute rows so banner/title never scroll off. */
 static int ui_show_help_popup(void) {
-    fkt_ui_clear_screen();
-    ui_draw_top_banner();
-    /* Subtitle lands on first body row (under separator). */
-    fkt_ui_draw_subtitle("SHELL HELP");
-    fkt_emit_cli_help(stdout, 1);
-    fkt_ui_body_puts("");
-    fkt_ui_body_puts("Press any key to dismiss...");
-    fkt_ui_pin_session_footer();
-    fkt_screen_recolor();
-    fflush(stdout);
-    return ui_wait_any_key();
+    static const char *help_lines[] = {
+        "Example (all forms):",
+        "  fkt  |  fkt preview <psbt>  |  fkt inspect <psbt>",
+        "  fkt sign --psbt in.psbt --out out.psbt --seed \"w1 w2 ...\"",
+        "  echo \"w1 w2 ...\" | fkt sign --psbt in.psbt --out out.psbt --yes",
+        "  fkt qr <text>  |  fkt qr --psbt <file> [--term] [--pbm f]",
+#if FKT_BUILD_DEV_HARNESS
+        "  Dev: fkt --base64 <psbt>  |  fkt <hex128> <path> <in> <out>",
+#endif
+        "  fkt --help  |  fkt --version",
+        "",
+        "Arguments:",
+        "  fkt               Open interactive wallet",
+        "  sign              CLI sign: --psbt --out [--seed] [--yes]",
+        "  preview           Read-only tx summary ([Q] QR)",
+        "  inspect           Same as preview",
+        "  qr                Show QR code",
+        "  <text>            Any QR payload",
+        "  --psbt            QR signed PSBT",
+        "  --term            Force terminal QR",
+        "  --pbm             Export PBM image",
+#if FKT_BUILD_DEV_HARNESS
+        "  sign              Sign from mnemonic ([Q] QR after)",
+        "  <in>              Input PSBT file",
+        "  <out>             Output signed PSBT",
+        "  \"mnemonic\"        Quoted seed words",
+        "  --base64          Print PSBT base64",
+        "  <hex128>          64-byte seed hex",
+        "  <path>            BIP32 derivation path",
+        "  --pubkey          Print derived pubkey",
+        "  --parent-pubkey   Advanced cosign path",
+        "  <pub33>           Parent pubkey hex",
+#endif
+        "  <psbt>            File or pasted base64",
+        "  --help, -h        Print this help",
+        "  --version         Print version string",
+        "  [Q]               Show QR on preview/sign screens",
+    };
+    const int nlines = (int)(sizeof(help_lines) / sizeof(help_lines[0]));
+    int scroll = 0;
+    int title_row = FKT_UI_BANNER_ROWS + 1;
+    int view_top = FKT_UI_BANNER_ROWS + 2; /* first content row under title */
+    int view_bot;
+    int view_h;
+    int max_scroll;
+    int i;
+    int ch;
+    int body_col;
+    int title_col;
+
+    view_bot = g_ui_rows - 3; /* hint row above footer */
+    if (view_bot <= view_top + 2)
+        view_bot = view_top + 8;
+    view_h = view_bot - view_top;
+    max_scroll = nlines - view_h;
+    if (max_scroll < 0)
+        max_scroll = 0;
+    body_col = fkt_ui_body_col();
+    title_col = ui_hpad((int)strlen("SHELL HELP")) + 1;
+
+    g_ui_input_hidden = 1;
+    ui_hide_cursor();
+
+    for (;;) {
+        fkt_ui_clear_screen();
+        ui_draw_top_banner();
+
+        /* Title on absolute row — no trailing blank from draw_subtitle. */
+        fkt_screen_clear_line(title_row);
+        fkt_screen_goto(title_row, title_col);
+        fputs(ui_green(), stdout);
+        fputs("SHELL HELP", stdout);
+
+        for (i = 0; i < view_h; i++) {
+            int idx = scroll + i;
+            int row = view_top + i;
+            fkt_screen_clear_line(row);
+            if (idx < 0 || idx >= nlines)
+                continue;
+            fkt_screen_goto(row, body_col);
+            fputs(ui_green(), stdout);
+            fputs(help_lines[idx], stdout);
+        }
+
+        {
+            char foot[72];
+            int row = view_bot;
+            fkt_screen_clear_line(row);
+            fkt_screen_goto(row, body_col);
+            fputs(ui_green(), stdout);
+            if (max_scroll > 0)
+                snprintf(foot, sizeof(foot),
+                         "Up/Down scroll  %d/%d  |  any other key dismiss",
+                         scroll + 1, max_scroll + 1);
+            else
+                snprintf(foot, sizeof(foot), "Press any key to dismiss...");
+            fputs(foot, stdout);
+        }
+        fkt_ui_pin_session_footer();
+        fkt_screen_recolor();
+        fflush(stdout);
+
+        ch = fkt_tty_read_key_once();
+        if (ch < 0 || ch == FKT_KEY_SPECIAL)
+            continue;
+        if (ch == FKT_KEY_UP || ch == 'k' || ch == 'K') {
+            if (scroll > 0)
+                scroll--;
+            continue;
+        }
+        if (ch == FKT_KEY_DOWN || ch == 'j' || ch == 'J') {
+            if (scroll < max_scroll)
+                scroll++;
+            continue;
+        }
+        if (ch == FKT_KEY_PGUP) {
+            scroll -= view_h;
+            if (scroll < 0)
+                scroll = 0;
+            continue;
+        }
+        if (ch == FKT_KEY_PGDN) {
+            scroll += view_h;
+            if (scroll > max_scroll)
+                scroll = max_scroll;
+            continue;
+        }
+        g_ui_input_hidden = 0;
+        return (ch == 27) ? 1 : 0;
+    }
 }
 
 static int ui_is_hotkey_char(int ch) {
@@ -1398,6 +1539,10 @@ static int ui_handle_global_hotkey(const char *choice) {
         return FKT_UI_HK_HANDLED;
     }
     return FKT_UI_HK_NONE;
+}
+
+int fkt_ui_handle_hotkey(const char *choice) {
+    return ui_handle_global_hotkey(choice);
 }
 
 /* 1 = accept seed, 0 = discard/cancel */
@@ -1500,6 +1645,28 @@ static int ui_read_line_interactive(char *out, size_t out_len, int reject_empty)
             continue;
 
         if (ch == 27) {
+            /*
+             * Drain CSI / bracketed-paste sequences (ESC [ ... letter/~).
+             * Real Esc alone (no follow-up within kbhit) still cancels.
+             */
+            if (fkt_tty_kbhit()) {
+                int n = fkt_tty_read_key();
+                if (n == '[' || n == 'O') {
+                    int k;
+                    while (fkt_tty_kbhit()) {
+                        k = fkt_tty_read_key();
+                        if (k == EOF)
+                            break;
+                        /* End of CSI: letter or tilde */
+                        if ((k >= 'A' && k <= 'Z') || (k >= 'a' && k <= 'z') ||
+                            k == '~')
+                            break;
+                    }
+                    continue; /* ignore sequence, keep editing */
+                }
+                /* Unknown ESC-prefix: ignore both bytes */
+                continue;
+            }
             g_ui_input_hidden = 0;
             fkt_ui_term_restore();
             if (g_ui_redraw_cb == ui_draw_main_menu) {
@@ -1554,6 +1721,11 @@ static int ui_read_line_interactive(char *out, size_t out_len, int reject_empty)
         }
 
         if (ch == '\n' || ch == '\r') {
+            /* Soft newline: more paste still buffered → keep accumulating. */
+            if (fkt_tty_kbhit() && pos + 1 < out_len) {
+                /* Drop CR when CRLF; keep going for multi-line base64 paste. */
+                continue;
+            }
             if (reject_empty && pos == 0)
                 continue;
             out[pos] = '\0';
@@ -1704,11 +1876,16 @@ static int ui_menu_preview(void) {
                 fkt_ui_body_puts("[!] Could not encode PSBT as QR.");
             continue;
         }
-        if (ch == '!' || ch == '#') {
+        if (ch == '?' || ch == '!' || ch == '#') {
             char hk[2];
+            int hres;
             hk[0] = (char)ch;
             hk[1] = '\0';
-            (void)ui_handle_global_hotkey(hk);
+            hres = ui_handle_global_hotkey(hk);
+            if (hres == FKT_UI_HK_MENU) {
+                g_ui_input_hidden = 0;
+                return 1;
+            }
             continue;
         }
     }
@@ -1881,33 +2058,52 @@ static int ui_menu_sign(void) {
         err = fkt_last_error_get();
         if (!err || err[0] == '\0')
             err = "Signing failed.";
-        snprintf(detail, sizeof(detail),
-                 "%s\n  Enter a writable .psbt filename, or press Enter\n"
-                 "  at the prompt to use default: %s",
-                 err, SIGN_DEFAULT_OUT);
+        /* Only nudge about path when the failure is actually a write/path issue. */
+        if (strstr(err, "Cannot write") || strstr(err, "filename") ||
+            strstr(err, "permission") || strstr(err, "Missing output path")) {
+            snprintf(detail, sizeof(detail),
+                     "%s\n  Enter a writable .psbt filename, or press Enter\n"
+                     "  at the prompt to use default: %s",
+                     err, SIGN_DEFAULT_OUT);
+        } else {
+            snprintf(detail, sizeof(detail), "%s", err);
+        }
         ui_draw_sign_notice("[!] Signing did not complete.", detail);
         if (!ui_wait_enter("Press Enter to return..."))
             return 0;
         return 0;
     }
 
+    /* Success: key material from the sign path is wiped; clear session seed too. */
+    fkt_memzero(g_session_words, sizeof(g_session_words));
+    g_session_num_words = 0;
+    g_seed_loaded = 0;
+
     for (;;) {
-        char line[16];
+        int ch;
 
         ui_draw_sign_screen(1);
-        if (!fkt_ui_read_line(line, sizeof(line), 0))
-            return 0;
-        if (ui_choice_is_qr(line)) {
-            if (fkt_ui_show_qr_psbt_file(g_sign_out_path) != 0)
+        ch = fkt_tty_read_key_once();
+        if (ch < 0 || ch == FKT_KEY_SPECIAL)
+            continue;
+        if (ch == 27 || ch == '\r' || ch == '\n' || ch == ' ') {
+            g_ui_input_hidden = 0;
+            return 1;
+        }
+        if (ch == 'q' || ch == 'Q') {
+            if (fkt_ui_show_qr_psbt_file(g_sign_out_path) != 0) {
                 fkt_ui_body_puts("[!] Could not encode signed PSBT as QR.");
+                (void)fkt_tty_read_key_once();
+            }
             continue;
         }
-        if (line[0] == 'a' || line[0] == 'A') {
-            if (fkt_ui_show_qr_psbt_ascii(g_sign_out_path) != 0)
+        if (ch == 'a' || ch == 'A') {
+            if (fkt_ui_show_qr_psbt_ascii(g_sign_out_path) != 0) {
                 fkt_ui_body_puts("[!] ASCII QR failed (PSBT may be too large).");
+                (void)fkt_tty_read_key_once();
+            }
             continue;
         }
-        return 1;
     }
 }
 

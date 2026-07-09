@@ -457,19 +457,22 @@ int fkt_sign_loaded_psbt(const uint8_t seed[64],
             }
 
             if (!has_tap_int_key) {
-                printf("Taproot input %d missing internal key (0x17).\n", i);
+                fkt_last_error_set(
+                    "Taproot input missing internal key (0x17) — cannot sign.");
                 goto cleanup;
             }
 
             if (fkt_bip341_sighash(i, sighash) != 0) {
-                printf("Sighash error for input %d (Taproot)\n", i);
+                fkt_last_error_set("Taproot sighash failed.");
                 goto cleanup;
             }
             fkt_debug_hex("sighash", sighash, 32);
 
             if (fkt_schnorr_sign_taproot(child_priv, sighash, tap_int_key,
                                          NULL, 0, sig, &sig_len) != 0) {
-                printf("Schnorr signing failed for input %d (check internal key)\n", i);
+                /* Wrong seed: derived key does not match PSBT internal key. */
+                fkt_last_error_set(
+                    "Wrong seed — key does not match this PSBT (Taproot).");
                 goto cleanup;
             }
             fkt_debug_hex("schnorr sig", sig, 64);
@@ -646,7 +649,8 @@ int fkt_sign_loaded_psbt(const uint8_t seed[64],
         fkt_remove_input_key_type(i, 0x02);
 
         if (memcmp(hash20, psbt_data.input_witness_script[i] + 2, 20) != 0) {
-            fkt_last_error_set("Public key mismatch (loaded seed does not own this PSBT).");
+            fkt_last_error_set(
+                "Wrong seed — public key does not match this PSBT.");
             goto cleanup;
         }
 
@@ -656,12 +660,13 @@ int fkt_sign_loaded_psbt(const uint8_t seed[64],
             size_t sig_len = sizeof(der_sig);
 
             if (fkt_bip143_sighash(i, psbt_data.input_witness_script[i], sighash) != 0) {
-                printf("Sighash error for input %d\n", i);
+                fkt_last_error_set("P2WPKH sighash failed.");
                 goto cleanup;
             }
             fkt_debug_hex("sighash", sighash, 32);
             if (fkt_ecdsa_sign_der_normalized(ctx, sighash, child_priv, der_sig, &sig_len) != 0) {
-                printf("Signing failed for input %d\n", i);
+                fkt_last_error_set(
+                    "Wrong seed — ECDSA sign failed (key mismatch).");
                 goto cleanup;
             }
             if (sig_len + 1 > sizeof(der_sig)) {
@@ -701,9 +706,11 @@ int fkt_sign_loaded_psbt(const uint8_t seed[64],
                     had_unknown = 1;
             }
             if (had_unknown)
-                fkt_last_error_set("No inputs could be signed (unsupported input type).");
+                fkt_last_error_set(
+                    "No inputs could be signed (unsupported input type).");
             else
-                fkt_last_error_set("No inputs could be signed (seed does not match PSBT).");
+                fkt_last_error_set(
+                    "Wrong seed — no inputs match this PSBT.");
             goto cleanup;
         }
     }
@@ -724,6 +731,12 @@ int fkt_sign_loaded_psbt(const uint8_t seed[64],
 cleanup:
     if (fout) fclose(fout);
     fkt_confirm_fingerprint_clear();
+    /* Never return failure with an empty last_error (TUI falls back to vague text). */
+    if (ok != 0) {
+        const char *e = fkt_last_error_get();
+        if (!e || e[0] == '\0')
+            fkt_last_error_set("Signing failed (check seed, PSBT, and output path).");
+    }
     return ok;
 }
 

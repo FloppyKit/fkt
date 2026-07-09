@@ -37,6 +37,8 @@ int  fkt_ui_debug_enabled(void);
 void fkt_ui_toggle_theme(void);
 void fkt_ui_set_input_pos(int row, int col);
 void fkt_ui_set_redraw_cb(void (*fn)(void));
+/* Global hotkeys: ? help, ! debug, # theme. Returns 0 none, 1 handled, 2 menu. */
+int  fkt_ui_handle_hotkey(const char *choice);
 int  fkt_ui_read_line(char *out, size_t out_len, int reject_empty);
 int  fkt_ui_prompt_path(const char *label, char *out, size_t out_len);
 int  fkt_ui_main_menu(void);

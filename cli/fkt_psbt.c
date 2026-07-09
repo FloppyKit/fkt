@@ -447,6 +447,28 @@ static int fkt_psbt_decode_buffer_as_b64(void) {
     return fkt_psbt_load_base64(g_b64_strip);
 }
 
+/* Heuristic: pasted PSBT base64 (starts with magic "psbt" in b64 = cHNidP). */
+static int fkt_psbt_looks_like_b64_blob(const char *s) {
+    size_t n = 0;
+    size_t i;
+
+    if (!s || s[0] == '\0')
+        return 0;
+    /* Classic BIP-174 base64 prefix for binary magic "psbt\xff". */
+    if (s[0] == 'c' && s[1] == 'H' && s[2] == 'N' && s[3] == 'i' &&
+        s[4] == 'd' && s[5] == 'P')
+        return 1;
+    /* Long pure-base64 blob (no path separators that look like short paths). */
+    for (i = 0; s[i]; i++) {
+        if (!fkt_psbt_is_b64_char(s[i]) && s[i] != ' ' && s[i] != '\n' &&
+            s[i] != '\r' && s[i] != '\t')
+            return 0;
+        if (fkt_psbt_is_b64_char(s[i]))
+            n++;
+    }
+    return (n >= 64) ? 1 : 0;
+}
+
 int fkt_psbt_load_input(const char *input) {
     char pathbuf[FKT_PSBT_INPUT_MAX];
 
@@ -459,7 +481,19 @@ int fkt_psbt_load_input(const char *input) {
     if (pathbuf[0] == '\0')
         return -1;
 
-    /* Always try filesystem path first (binary .psbt or base64 .txt sidecar). */
+    /* Pasted base64 first — avoids fopen/DEBUG spam on long cHNidP... blobs. */
+    if (fkt_psbt_looks_like_b64_blob(pathbuf)) {
+        fkt_psbt_init();
+        fkt_psbt_strip_b64_ws(pathbuf, g_b64_strip, sizeof(g_b64_strip));
+        if (g_b64_strip[0] != '\0' && fkt_psbt_load_base64(g_b64_strip) == 0) {
+            if (fkt_psbt_validate_loaded())
+                return 0;
+        }
+        fkt_psbt_init();
+        return -1;
+    }
+
+    /* Filesystem path (binary .psbt or base64 .txt sidecar). */
     fkt_psbt_init();
     if (fkt_psbt_load_file(pathbuf) == 0) {
         if (fkt_psbt_validate_loaded())

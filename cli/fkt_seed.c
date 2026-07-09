@@ -661,13 +661,14 @@ static int fkt_seed_collect_words(char words[MAX_WORDS][WORD_BUF], int num_words
                              SEED_MSG_BAD_CHECKSUM, 0);
         fkt_last_error_set(SEED_MSG_BAD_CHECKSUM);
         fkt_secure_zero(words, sizeof(words[0]) * MAX_WORDS);
-        {
-            char dummy[8];
-            fkt_ui_body_puts("");
-            fkt_ui_body_puts("Press Enter to return...");
-            fkt_ui_set_input_pos(0, 0);
-            (void)fkt_ui_read_line(dummy, sizeof(dummy), 0);
-        }
+        /* Inside the box, one row below "All N words entered." — no cursor. */
+        fkt_seed_draw_row(g_input_row + 1, "Press Enter to return...",
+                          SEED_RESET, 1);
+        fkt_seed_box_edge_bottom();
+        fkt_ui_pin_session_footer();
+        fkt_ui_set_input_pos(0, 0);
+        fkt_screen_cursor_hide();
+        (void)fkt_tty_read_key_once();
         return 0;
     }
     return 1;
@@ -797,33 +798,46 @@ void fkt_secure_zero(void *ptr, size_t len) {
 int fkt_sign_psbt_from_words(const char *input_psbt, const char *output_psbt,
                              char words[MAX_WORDS][WORD_BUF], int num_words) {
     char mnemonic[512];
+    /* Local copy so wipe never clears the caller's session seed on failure. */
+    char words_copy[MAX_WORDS][WORD_BUF];
     uint8_t seed[64];
     static const uint8_t salt[] = "mnemonic";
     int i;
     int pos = 0;
+    int rc;
+
+    if (!words || num_words < 1 || num_words > MAX_WORDS)
+        return -1;
 
     for (i = 0; i < num_words; i++) {
         size_t wlen;
+        strncpy(words_copy[i], words[i], WORD_BUF - 1);
+        words_copy[i][WORD_BUF - 1] = '\0';
         if (i > 0) mnemonic[pos++] = ' ';
-        wlen = strlen(words[i]);
-        if (pos + (int)wlen >= (int)sizeof(mnemonic)) return -1;
-        memcpy(mnemonic + pos, words[i], wlen);
+        wlen = strlen(words_copy[i]);
+        if (wlen == 0) {
+            fkt_last_error_set("Seed words are empty — reload the seed (option 1).");
+            return -1;
+        }
+        if (pos + (int)wlen >= (int)sizeof(mnemonic)) {
+            fkt_last_error_set("Mnemonic too long.");
+            return -1;
+        }
+        memcpy(mnemonic + pos, words_copy[i], wlen);
         pos += (int)wlen;
     }
     mnemonic[pos] = '\0';
 
     fkt_memzero_register_seed(seed, sizeof(seed));
     fkt_memzero_register_mnemonic(mnemonic, sizeof(mnemonic));
-    fkt_memzero_register_words(words, sizeof(words[0]) * MAX_WORDS);
+    fkt_memzero_register_words(words_copy, sizeof(words_copy));
 
     fkt_pbkdf2_hmac_sha512(mnemonic, (size_t)pos, salt, 8, 2048, seed, 64);
     fkt_memzero(mnemonic, sizeof(mnemonic));
     fkt_secp256k1_init();
     fkt_last_error_clear();
-    if (fkt_sign_psbt(seed, "", input_psbt, output_psbt) != 0) {
-        fkt_memzero_wipe_all();
-        return -1;
-    }
+    rc = fkt_sign_psbt(seed, "", input_psbt, output_psbt);
+    /* Always wipe derived material + local copy; leave caller's words intact. */
     fkt_memzero_wipe_all();
-    return 0;
+    return rc != 0 ? -1 : 0;
 }
