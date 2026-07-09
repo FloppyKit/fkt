@@ -19,7 +19,7 @@ OBJS = main.o \
 
 all: fktsigner verify_ecdsa
 
-.PHONY: test-sparrow test-sparrow-real sparrow-base64 clean
+.PHONY: test-sparrow test-sparrow-real test-sparrow-real-list sparrow-base64 clean
 
 $(SECP_LIB):
 	cd $(SECP_DIR) && gcc -std=c99 -O2 -Iinclude -Isrc -DENABLE_MODULE_SCHNORRSIG -DENABLE_MODULE_EXTRAKEYS -c src/secp256k1.c -o libsecp256k1_main.o
@@ -36,10 +36,14 @@ verify_ecdsa: verify_ecdsa.c $(SECP_LIB)
 test-sparrow: fktsigner verify_ecdsa
 	python3 tests/test_sparrow_real.py
 
-# Layout package: list/check high-priority matrix from manifest.json.
-# Sign/reject harness lands in the next work package (does not build C here).
-test-sparrow-real:
+# List/check fixtures only (no signer).
+test-sparrow-real-list:
 	python3 tests/sparrow_real_list.py --check
+
+# Sign/reject harness against manifest + env/default testnet seeds.
+# Default: high+medium+low. Full matrix: make test-sparrow-real ARGS=--all
+test-sparrow-real: fktsigner verify_ecdsa
+	python3 tests/run_sparrow_real_harness.py $(ARGS)
 
 sparrow-base64: fktsigner
 	@test -n "$(PSBT)" || (echo "Usage: make sparrow-base64 PSBT=path/to/signed.psbt"; exit 1)

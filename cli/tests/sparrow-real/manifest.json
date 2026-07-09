@@ -13,8 +13,8 @@
   "policy": {
     "p2sh_p2wpkh": "sign_if_key_matches",
     "p2wsh": "partial_sig_only",
-    "p2tr_script_path": "reject_until_0.2",
-    "notes": "Nested P2SH-P2WPKH: sign when BIP32 paths match seed. P2WSH: partial_sig only (not fully supported). Script-path Taproot: hard reject until script-path build (0.2)."
+    "p2tr_script_path": "keypath_fixtures_sign_until_true_scriptpath",
+    "notes": "Nested P2SH-P2WPKH: sign when BIP32 paths match seed (partial_sig insert; finalization may differ from Sparrow). P2WSH: partial_sig only. Current sparrow-taproot-scriptpath* fixtures are KEYPATH spends (have 0x17, no TAP_MERKLE_ROOT 0x18 / TAP_LEAF_SCRIPT 0x15) \u2014 expect=sign. True script-path reject/sign vectors land with 0.2 crypto."
   },
   "seeds": {
     "call_release": {
@@ -186,7 +186,7 @@
         "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out.psbt",
         "signed": "Signed/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-signed.psbt"
       },
-      "notes": "CRITICAL mixed inputs; fingerprint 9581fdb1 (call release)"
+      "notes": "CRITICAL multi-input case from Sparrow mixed export name. Current fixture witness UTXOs are both P2WPKH (0014\u2026); still required High. Re-export true P2WPKH+P2TR when available."
     },
     {
       "id": "p2wpkh_3in_1out",
@@ -273,7 +273,7 @@
       "unsigned": "unsigned/p2tr_script_path.psbt",
       "sparrow_signed": "sparrow-signed/p2tr_script_path.psbt",
       "fkt_signed": "fkt-signed/p2tr_script_path.psbt",
-      "expect": "reject",
+      "expect": "sign",
       "script": "p2tr_script_path",
       "priority": "low",
       "seed_ref": "call_release",
@@ -282,7 +282,7 @@
         "unsigned": "Unsigned/v1/sparrow-taproot-scriptpath-unsigned.psbt",
         "signed": "Signed/v1/sparrow-taproot-scriptpath-signed.psbt"
       },
-      "notes": "v0.1 hard-aborts on TAP_MERKLE_ROOT/script-path (0x18); keep reject until 0.2"
+      "notes": "Named scriptpath in Sparrow export but PSBT is key-path (TAP_INTERNAL_KEY 0x17, no 0x18/0x15). FKT keypath-signs; matches Sparrow keypath witness. Real script-path fixtures TODO for 0.2."
     },
     {
       "id": "p2wpkh_dust",
@@ -410,7 +410,7 @@
         "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-rbf-off.psbt",
         "signed": null
       },
-      "notes": "RBF off variant"
+      "notes": "RBF off variant (inspect: may be multi-P2WPKH under mixed name)"
     },
     {
       "id": "mixed_p2wpkh_p2tr_2in_2out_locktime_on",
@@ -426,7 +426,7 @@
         "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-locktime-on.psbt",
         "signed": null
       },
-      "notes": "Locktime on variant"
+      "notes": "Locktime on variant (inspect: may be multi-P2WPKH under mixed name)"
     },
     {
       "id": "mixed_p2wpkh_p2tr_2in_2out_all_anyonecanpay",
@@ -442,7 +442,7 @@
         "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-all-anyonecanpay.psbt",
         "signed": null
       },
-      "notes": "SIGHASH_ANYONECANPAY all inputs"
+      "notes": "SIGHASH_ANYONECANPAY all inputs (inspect: may be multi-P2WPKH under mixed name)"
     },
     {
       "id": "p2sh_p2wpkh_rbf_off",
@@ -497,7 +497,7 @@
       "unsigned": "unsigned/p2tr_script_path_rbf_no.psbt",
       "sparrow_signed": null,
       "fkt_signed": "fkt-signed/p2tr_script_path_rbf_no.psbt",
-      "expect": "reject",
+      "expect": "sign",
       "script": "p2tr_script_path",
       "priority": "bonus",
       "seed_ref": "call_release",
@@ -506,14 +506,14 @@
         "unsigned": "Unsigned/v1/sparrow-taproot-scriptpath-rbf-no-unsigned.psbt",
         "signed": null
       },
-      "notes": "Script-path RBF off; reject until 0.2"
+      "notes": "Named scriptpath in Sparrow export but PSBT is key-path (TAP_INTERNAL_KEY 0x17, no 0x18/0x15). FKT keypath-signs; matches Sparrow keypath witness. Real script-path fixtures TODO for 0.2."
     },
     {
       "id": "p2tr_script_path_locktime_on",
       "unsigned": "unsigned/p2tr_script_path_locktime_on.psbt",
       "sparrow_signed": null,
       "fkt_signed": "fkt-signed/p2tr_script_path_locktime_on.psbt",
-      "expect": "reject",
+      "expect": "sign",
       "script": "p2tr_script_path",
       "priority": "bonus",
       "seed_ref": "call_release",
@@ -522,14 +522,14 @@
         "unsigned": "Unsigned/v1/sparrow-taproot-scriptpath-locktime-on-unsigned.psbt",
         "signed": null
       },
-      "notes": "Script-path locktime; reject until 0.2"
+      "notes": "Named scriptpath in Sparrow export but PSBT is key-path (TAP_INTERNAL_KEY 0x17, no 0x18/0x15). FKT keypath-signs; matches Sparrow keypath witness. Real script-path fixtures TODO for 0.2."
     },
     {
       "id": "p2tr_script_path_anyonecanpay",
       "unsigned": "unsigned/p2tr_script_path_anyonecanpay.psbt",
       "sparrow_signed": null,
       "fkt_signed": "fkt-signed/p2tr_script_path_anyonecanpay.psbt",
-      "expect": "reject",
+      "expect": "sign",
       "script": "p2tr_script_path",
       "priority": "bonus",
       "seed_ref": "call_release",
@@ -538,7 +538,7 @@
         "unsigned": "Unsigned/v1/sparrow-taproot-scriptpath-anyonepay-unsigned.psbt",
         "signed": null
       },
-      "notes": "Script-path ANYONECANPAY; reject until 0.2"
+      "notes": "Named scriptpath in Sparrow export but PSBT is key-path (TAP_INTERNAL_KEY 0x17, no 0x18/0x15). FKT keypath-signs; matches Sparrow keypath witness. Real script-path fixtures TODO for 0.2."
     }
   ]
 }

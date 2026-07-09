@@ -68,7 +68,28 @@ Documented in `manifest.json` → `policy`:
 |--------|--------|
 | Nested P2SH-P2WPKH | **sign if key matches** (code path exists) |
 | P2WSH multisig | **partial_sig only** — not fully supported |
-| Taproot script-path | **reject until 0.2** (hard abort on merkle/script-path fields) |
+| Taproot script-path | Current named fixtures are **keypath** (sign). True script-path (0x18/0x15) → 0.2 + version bump |
+
+---
+
+## Running the harness
+
+```bash
+cd cli
+make                    # build fktsigner + verify_ecdsa
+make test-sparrow-real  # high + medium + low (sign/reject)
+make test-sparrow-real ARGS=--all
+make test-sparrow-real-list   # fixtures only, no signing
+
+# Optional seed overrides (mnemonic or 128-char hex):
+export FKT_SEED_CALL_RELEASE="call release rib regret ..."
+export FKT_SEED_NESTED="reward parade plug shop ..."
+export FKT_SEED_LEGACY_P2WPKH_HEX="<128 hex chars>"
+```
+
+Outputs land in `fkt-signed/`. Pass criteria: signer success + signature material;
+byte-equal to Sparrow when possible; else ECDSA verify (`verify_ecdsa`) for
+P2WPKH legs; Taproot keypath witness structure / Sparrow witness match.
 
 ---
 
@@ -77,7 +98,7 @@ Documented in `manifest.json` → `policy`:
 List anytime with:
 
 ```bash
-cd cli && make test-sparrow-real
+cd cli && make test-sparrow-real-list
 # or: python3 tests/sparrow_real_list.py
 ```
 
@@ -117,10 +138,10 @@ See `cli/tests/TEST_SEEDS.md`. Summary:
 
 | Package | Status |
 |---------|--------|
-| 1 Layout + manifest + README | **this commit** |
-| 2 Sign/reject harness against env seed | next |
-| 3 FKT-signed goldens + checklist | after harness |
-| Script-path signing (0.2) | later — keep reject fixtures green |
+| 1 Layout + manifest + README | done (`test-matrix-step-1-layout-complete`) |
+| 2 Sign/reject harness against env seed | **this commit** |
+| 3 FKT-signed goldens + checklist | next |
+| Script-path signing (0.2) | later — true 0x18/0x15 fixtures; version bump when support lands |
 
 ---
 
