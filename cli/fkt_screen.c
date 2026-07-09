@@ -11,7 +11,8 @@
 
 #if FKT_PLATFORM_DOS
 #define FKT_DOS_ATTR_GREEN  0x0A /* light green on black */
-#define FKT_DOS_ATTR_AMBER  0x0E /* yellow/amber on black */
+/* VGA text: 0x0E is bright yellow; 0x06 brown reads as deep amber/orange on CRTs. */
+#define FKT_DOS_ATTR_AMBER  0x06
 #define FKT_DOS_BANNER_ROWS 2
 
 static const char fkt_dos_banner_text[] = "FKT SIGNER v0.1";

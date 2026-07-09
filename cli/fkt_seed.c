@@ -29,7 +29,7 @@
 #else
 #define SEED_GREEN   "\033[1;32m"
 #define SEED_RED     "\033[1;31m"
-#define SEED_YELLOW  "\033[1;33m"
+#define SEED_YELLOW  "\033[38;5;208m"
 #define SEED_DIM     "\033[32m"
 #define SEED_RESET   "\033[0m"
 #endif

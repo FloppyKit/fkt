@@ -31,7 +31,9 @@
 #endif
 
 #define UI_GREEN     "\033[32m"
-#define UI_AMBER     "\033[33m"
+/* 256-color deep orange (was ANSI yellow 33). Falls back poorly only on
+ * ancient 16-color terms; DOS uses VRAM brown attr instead (see fkt_screen). */
+#define UI_AMBER     "\033[38;5;208m"
 #define UI_PURPLE    "\033[35m"
 
 #if (defined(FKT_ASCII_ONLY) && FKT_ASCII_ONLY) || FKT_PLATFORM_DOS
@@ -157,7 +159,7 @@ int fkt_ui_debug_enabled(void) {
 void fkt_ui_toggle_theme(void) {
     g_ui_theme_amber = !g_ui_theme_amber;
 #if FKT_PLATFORM_DOS
-    /* VRAM attribute theme (green 0x0A <-> amber 0x0E). */
+    /* VRAM attribute theme (green 0x0A <-> brown/orange 0x06). */
     fkt_screen_set_theme_amber(g_ui_theme_amber);
 #endif
 }
