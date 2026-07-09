@@ -18,6 +18,7 @@
 #include "fkt_sha256.h"
 #include "fkt_platform.h"
 #include "fkt_cam.h"
+#include "fkt_address.h"
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -50,7 +51,7 @@
 #endif
 
 
-#define UI_LEFT_LABEL  "FKT SIGNER v0.1"
+#define UI_LEFT_LABEL  "FKT SIGNER v0.2"
 #define UI_BODY_W      66
 
 #define SIGN_DEFAULT_OUT "tx-2026-07-06-fkt.psbt"
@@ -88,12 +89,17 @@ static char g_sign_out_path[512];
 static int  g_seed_loaded = 0;
 static char g_session_words[MAX_WORDS][WORD_BUF];
 static int  g_session_num_words = 0;
+/* Session-only receive counters (Ice Cold: no disk). Reset on seed unload. */
+static uint32_t g_recv_idx_wpkh = 0;
+static uint32_t g_recv_idx_tr = 0;
 
 static int g_term_raw = 0;
 static int g_term_interactive = 0;
 
 static void ui_draw_sign_screen(int done);
 static void ui_draw_generated_seed_screen(const char words[][WORD_BUF], int num_words);
+static void ui_recv_reset_indices(void);
+static void ui_draw_receive_address_screen(void);
 static void ui_draw_entropy_screen(int pct, int roll, int spin_frame, int animate,
                                    int locked, int quantum_flash, int num_words);
 static int ui_handle_global_hotkey(const char *choice);
@@ -1081,7 +1087,7 @@ static void ui_draw_show_seed_screen(void) {
     fkt_ui_body_puts("");
     fkt_show_seed_grid(words, num_words);
     fkt_ui_body_puts("");
-    fkt_ui_body_puts("[Q] QR backup     [Enter/Esc] Return");
+    fkt_ui_body_puts("[Q] QR backup   [R] Receive address   [Enter/Esc] Return");
     fkt_ui_pin_session_footer();
     /* No blinking input cursor — key-driven screen only. */
     g_ui_input_hidden = 1;
@@ -1799,10 +1805,12 @@ void fkt_ui_draw_banner(int air_gapped) {
 static int ui_menu_load_seed(void) {
     if (fkt_interactive_seed(g_session_words, &g_session_num_words)) {
         g_seed_loaded = 1;
+        ui_recv_reset_indices();
         return 1;
     }
     g_seed_loaded = 0;
     g_session_num_words = 0;
+    ui_recv_reset_indices();
     /* Surface failure — silent return to menu was confusing. */
     {
         const char *err = fkt_last_error_get();
@@ -2084,6 +2092,7 @@ static int ui_menu_sign(void) {
     fkt_memzero(g_session_words, sizeof(g_session_words));
     g_session_num_words = 0;
     g_seed_loaded = 0;
+    ui_recv_reset_indices();
 
     for (;;) {
         int ch;
@@ -2113,6 +2122,173 @@ static int ui_menu_sign(void) {
     }
 }
 
+/* --- Receive address (Ice Cold: session index; network chosen each time) --- */
+
+static char g_recv_addr[96];
+static char g_recv_path[64];
+static int  g_recv_script_kind; /* 0 wpkh, 1 tr */
+static int  g_recv_network;     /* 0 mainnet, 1 testnet */
+
+static void ui_draw_receive_address_screen(void) {
+    fkt_ui_clear_screen();
+    ui_draw_top_banner();
+    fkt_ui_draw_subtitle("RECEIVE ADDRESS");
+    fkt_ui_body_puts("Share only this address to receive. Never share the seed.");
+    fkt_ui_body_puts("");
+    if (g_recv_script_kind == 0)
+        fkt_ui_body_puts("Type: Native SegWit (BIP84 P2WPKH)");
+    else
+        fkt_ui_body_puts("Type: Taproot (BIP86 P2TR keypath)");
+    if (g_recv_network == 0)
+        fkt_ui_body_puts("Network: Mainnet");
+    else
+        fkt_ui_body_puts("Network: Testnet");
+    fkt_ui_body_printf("Path: %s\n", g_recv_path);
+    fkt_ui_body_puts("");
+    fkt_ui_body_puts("Address:");
+    fkt_ui_body_printf("%s\n", g_recv_addr);
+    fkt_ui_body_puts("");
+    fkt_ui_body_puts("[Q] QR code   [Enter/Esc] Back to seed");
+    fkt_ui_pin_session_footer();
+    g_ui_input_hidden = 1;
+    g_input_row = 0;
+    g_input_col = 0;
+    ui_hide_cursor();
+    g_ui_redraw_cb = ui_draw_receive_address_screen;
+}
+
+static int ui_session_seed_live(void) {
+    return g_seed_loaded && g_session_num_words > 0 &&
+           g_session_words[0][0] != '\0';
+}
+
+static void ui_recv_reset_indices(void) {
+    g_recv_idx_wpkh = 0;
+    g_recv_idx_tr = 0;
+}
+
+/* 1 = got choice, 0 = cancel */
+static int ui_pick_one_two(const char *title, const char *line1, const char *line2,
+                           int *out_choice) {
+    int ch;
+
+    for (;;) {
+        fkt_ui_clear_screen();
+        ui_draw_top_banner();
+        fkt_ui_draw_subtitle(title);
+        fkt_ui_body_puts(line1);
+        fkt_ui_body_puts(line2);
+        fkt_ui_body_puts("");
+        fkt_ui_body_puts("[1] / [2] select   [Esc] Cancel");
+        fkt_ui_pin_session_footer();
+        g_ui_input_hidden = 1;
+        ui_hide_cursor();
+        ch = fkt_tty_read_key_once();
+        if (ch < 0 || ch == FKT_KEY_SPECIAL)
+            continue;
+        if (ch == 27)
+            return 0;
+        if (ch == '1') {
+            *out_choice = 0;
+            return 1;
+        }
+        if (ch == '2') {
+            *out_choice = 1;
+            return 1;
+        }
+    }
+}
+
+static int ui_receive_address_flow(void) {
+    char words[MAX_WORDS][WORD_BUF];
+    int num_words;
+    int script_kind;
+    int network;
+    uint32_t idx;
+    int ch;
+
+    if (!ui_session_seed_live()) {
+        fkt_ui_clear_screen();
+        ui_draw_top_banner();
+        fkt_ui_draw_subtitle("RECEIVE ADDRESS");
+        fkt_ui_body_puts("[!] No live seed in session.");
+        fkt_ui_body_puts("Load or create a seed first (options 1 or 6).");
+        fkt_ui_body_puts("Note: seed words are wiped after a successful sign.");
+        fkt_ui_body_puts("");
+        fkt_ui_body_puts("Press Enter to return...");
+        fkt_ui_pin_session_footer();
+        g_ui_input_hidden = 1;
+        ui_hide_cursor();
+        for (;;) {
+            ch = fkt_tty_read_key_once();
+            if (ch == 27 || ch == '\r' || ch == '\n')
+                break;
+        }
+        return 0;
+    }
+
+    if (!ui_pick_one_two("RECEIVE " UI_EM_DASH " SCRIPT TYPE",
+                         "[1] Native SegWit  BIP84  (bc1q / tb1q)",
+                         "[2] Taproot        BIP86  (bc1p / tb1p)",
+                         &script_kind))
+        return 0;
+
+    if (!ui_pick_one_two("RECEIVE " UI_EM_DASH " NETWORK",
+                         "[1] Mainnet  (bc1...)",
+                         "[2] Testnet  (tb1...)",
+                         &network))
+        return 0;
+
+    ui_fill_show_words(words, &num_words);
+    if (script_kind == 0) {
+        idx = g_recv_idx_wpkh;
+        g_recv_idx_wpkh++;
+    } else {
+        idx = g_recv_idx_tr;
+        g_recv_idx_tr++;
+    }
+
+    if (fkt_address_receive_from_words(words, num_words, script_kind, network, idx,
+                                       g_recv_addr, sizeof(g_recv_addr),
+                                       g_recv_path, sizeof(g_recv_path)) != 0) {
+        fkt_ui_clear_screen();
+        ui_draw_top_banner();
+        fkt_ui_draw_subtitle("RECEIVE ADDRESS");
+        fkt_ui_body_puts("[!] Could not derive address.");
+        fkt_ui_body_puts("Press Enter to return...");
+        fkt_ui_pin_session_footer();
+        g_ui_input_hidden = 1;
+        ui_hide_cursor();
+        for (;;) {
+            ch = fkt_tty_read_key_once();
+            if (ch == 27 || ch == '\r' || ch == '\n')
+                break;
+        }
+        return 0;
+    }
+
+    g_recv_script_kind = script_kind;
+    g_recv_network = network;
+
+    for (;;) {
+        ui_draw_receive_address_screen();
+        ch = fkt_tty_read_key_once();
+        if (ch < 0 || ch == FKT_KEY_SPECIAL)
+            continue;
+        if (ch == 27 || ch == '\r' || ch == '\n')
+            break;
+        if (ch == 'q' || ch == 'Q') {
+            if (fkt_ui_show_qr_text(g_recv_addr) != 0) {
+                fkt_ui_body_puts("[!] Could not encode address as QR.");
+                (void)fkt_tty_read_key_once();
+            }
+            continue;
+        }
+    }
+    fkt_memzero(g_recv_addr, sizeof(g_recv_addr));
+    return 1;
+}
+
 static int ui_menu_show_seed(void) {
     char words[MAX_WORDS][WORD_BUF];
     int num_words;
@@ -2133,6 +2309,10 @@ static int ui_menu_show_seed(void) {
                 fkt_ui_body_puts("[!] Could not encode seed as QR.");
                 (void)fkt_tty_read_key_once();
             }
+            continue;
+        }
+        if (ch == 'r' || ch == 'R') {
+            ui_receive_address_flow();
             continue;
         }
         /* Ignore V and everything else — no verify-from-view. */
@@ -2227,6 +2407,7 @@ static int ui_menu_new_wallet(void) {
     }
     g_session_num_words = num_words;
     g_seed_loaded = 1;
+    ui_recv_reset_indices();
     fkt_memzero(entropy, sizeof(entropy));
     fkt_memzero(generated, sizeof(generated));
     return 1;

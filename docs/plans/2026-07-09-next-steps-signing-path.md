@@ -21,6 +21,8 @@
 **Deferred (human):** DOSBox runtime smoke of `FKTSIGN.EXE` (Matt when available).  
 **Blocked externally:** Second signet faucet bech32m — **do not block crypto packages.**
 
+**Warm (later, not Ice Cold):** durable settings UI (e.g. default mainnet vs testnet for receive). Ice Cold prompts network each time on receive-address flow.
+
 ---
 
 ## 1. North star (what “done enough” means for FKT CLI)

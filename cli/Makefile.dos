@@ -37,6 +37,8 @@ BASE_OBJS  = main.o \
              fkt_hash160.o \
              fkt_bip32.o \
              fkt_secp256k1.o \
+             fkt_bech32.o \
+             fkt_address.o \
              fkt_psbt.o \
              fkt_preview.o \
              fkt_confirm.o \
