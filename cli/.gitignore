@@ -3,6 +3,7 @@
 *.txt
 !docs/DOS_README.TXT
 !docs/DOS_TEST_STATUS.txt
+!docs/RELEASE_v0.1.0.txt
 dos-obj/
 FKTSIGN.EXE
 FKTSIGNER.EXE

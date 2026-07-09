@@ -1310,6 +1310,9 @@ static void fkt_emit_cli_help(FILE *fp, int use_ui) {
     help_emit_arg(fp, use_ui, "--help, -h", "Print this help");
     help_emit_arg(fp, use_ui, "--version", "Print version string");
     help_emit_arg(fp, use_ui, "[Q]", "Show QR on preview/sign screens");
+    help_emit_line(fp, use_ui, "");
+    help_emit_line(fp, use_ui, "v0.1 supports: BIP39, P2WPKH, P2TR keypath, preview, sign, QR");
+    help_emit_line(fp, use_ui, "Not in v0.1: camera, Taproot script-path, Ark/Bark, multisig cosign UX");
 }
 
 void fkt_cli_print_help(FILE *fp) {
@@ -1399,6 +1402,9 @@ static int ui_show_help_popup(void) {
         "  --help, -h        Print this help",
         "  --version         Print version string",
         "  [Q]               Show QR on preview/sign screens",
+        "",
+        "v0.1: BIP39, P2WPKH, P2TR keypath, preview, sign, QR",
+        "Not in v0.1: camera, script-path Taproot, Ark, multisig cosign UX",
     };
     const int nlines = (int)(sizeof(help_lines) / sizeof(help_lines[0]));
     int scroll = 0;

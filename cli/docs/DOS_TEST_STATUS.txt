@@ -1,13 +1,13 @@
 FKT DOS BUILD — TEST STATUS
 ===========================
-Branch: cli/tui-pr1-visual (on top of cli/pr3-dos-floppy)
-Last updated: 2026-07-08
+Branch: cli/tui-pr5-cli
+Last updated: 2026-07-09  (v0.1.0 ship)
 
 VERIFIED (automated / dev host)
 -------------------------------
-[PASS] make -f Makefile.dos          -> FKTSIGN.EXE (~415 KB)
+[PASS] make -f Makefile.dos          -> FKTSIGN.EXE
 [PASS] check_floppy_size.sh            -> within 1.20 MiB EXE budget
-[PASS] dosbox_smoke.sh FKTSIGN.EXE     -> prints "fkt 0.1.0-dev" (Linux/X280)
+[PASS] dosbox_smoke.sh FKTSIGN.EXE     -> prints "fkt 0.1.0" (Linux)
 [PASS] make (Linux dev)                -> fktsigner --version OK
 
 TUI PR1 (visual foundation) — NEEDS MANUAL QA

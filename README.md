@@ -38,10 +38,11 @@ Minimal Linux GUI (Tiny Core based) that boots from USB/floppy and includes the 
 **3. FKT PWA** — The modern offline transaction coordinator  
 Single-file offline HTML app. Drag & drop PSBTs, preview, edit, and either sign directly (WASM) or export to CLI for true air-gapped signing. Includes Paranoid Send Mode and educational debug view.
 
-### Current Phase: Pre-v0.1
+### Current Phase: v0.1.0 (CLI / DOS TUI)
 
-We are still **pre-v0.1**.  
-The v0.1–v0.4 roadmap covers the core PSBT signing suite (parsing, signing, multisig, Taproot, change handling, test vectors, etc.). We are actively building toward v0.1.
+**v0.1.0** ships the offline single-sig signer: BIP39 seed, P2WPKH + P2TR keypath, preview, dual CONFIRM, QR display — Linux CLI and DOS (`FKTSIGN.EXE`).
+
+Not in 0.1: camera capture, Taproot script-path, Ark/Bark, multisig cosign productization, full PWA. See `cli/docs/RELEASE_v0.1.0.txt`.
 
 ### Philosophy
 
@@ -65,13 +66,12 @@ The v0.1–v0.4 roadmap covers the core PSBT signing suite (parsing, signing, mu
 **Modern air-gapped path:**
 - Any machine you can compile/run C on + browser for the PWA
 
-### Current Status (June 2026)
+### Current Status (July 2026)
 
-- Core PSBT parsing + signing working (P2WPKH, multisig, Taproot)
-- CLI binary + Bootable GUI + PWA in active development
-- Test vectors and golden files expanding
-- Still pre-v0.1 — heavy refactoring in progress
-- No mainnet support or production readiness yet
+- **v0.1.0**: offline PSBT signer — P2WPKH + P2TR keypath, TUI + CLI, DOS floppy build
+- Release notes: `cli/docs/RELEASE_v0.1.0.txt`
+- Post-0.1: script-path Taproot, Ark fixtures, multisig UX, camera, PWA
+- Still air-gapped / test carefully; verify addresses on a second device
 
 ### Quick Start
 
