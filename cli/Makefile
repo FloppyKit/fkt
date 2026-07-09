@@ -149,29 +149,50 @@ fuzz: fkt_fuzz fuzz-corpus
 clean:
 	rm -f *.o fktsigner verify_ecdsa fkt_fuzz test_parse psbt_parse_test test_qr
 # --- Matrix / v0.2 harness (from test-matrix branch) ---
-.PHONY: test-sparrow-real test-sparrow-real-list test-sparrow-real-golden test-scriptpath test-parity-linux
+.PHONY: test-sparrow-real test-sparrow-real-list test-sparrow-real-golden test-scriptpath test-scriptpath-ark test-parity-linux
 
 test-sparrow-real-list:
 	python3 tests/sparrow_real_list.py --check
 
-test-sparrow-real: fktsigner verify_ecdsa
+test-sparrow-real: fktsigner verify_ecdsa gen-scriptpath-fixtures
 	python3 tests/run_sparrow_real_harness.py $(ARGS)
 
-test-sparrow-real-golden: fktsigner verify_ecdsa
+test-sparrow-real-golden: fktsigner verify_ecdsa gen-scriptpath-fixtures
 	python3 tests/run_sparrow_real_harness.py --check-golden $(ARGS)
 
 GEN_SP = tests/gen_scriptpath_vector
 SP_SEED ?= dc26536673dd2912aae6863d2984566995154dcdd72c003ebf4dc61e7b93e710e9693f23cfc397ca71bc9362cefb95ab52896d0dc68cfae352b6d8dda13aaeaa
-SP_UNSIGNED = tests/sparrow-real/unsigned/p2tr_script_path_synthetic.psbt
-SP_SIGNED = tests/sparrow-real/fkt-signed/p2tr_script_path_synthetic.psbt
+SP_DIR = tests/sparrow-real/unsigned
+SP_OUT = tests/sparrow-real/fkt-signed
 
 $(GEN_SP): tests/gen_scriptpath_vector.c $(SECP_LIB)
 	$(CC) $(CFLAGS) -o $@ tests/gen_scriptpath_vector.c fkt_bip32.o fkt_secp256k1.o fkt_sha256.o fkt_sha512.o fkt_hmac.o fkt_hash160.o fkt_ripemd160.o fkt_util.o fkt_error.o fkt_sighash.o fkt_psbt.o fkt_memzero.o $(SECP_LIB)
 
-test-scriptpath: fktsigner $(GEN_SP)
-	$(GEN_SP) $(SP_SEED) $(SP_UNSIGNED)
-	./fktsigner $(SP_SEED) "m/86'/1'/0'/0/0" $(SP_UNSIGNED) $(SP_SIGNED)
-	@echo "PASS test-scriptpath"
+.PHONY: gen-scriptpath-fixtures
+gen-scriptpath-fixtures: $(GEN_SP)
+	@mkdir -p $(SP_DIR) $(SP_OUT)
+	$(GEN_SP) $(SP_SEED) $(SP_DIR)/p2tr_script_path_synthetic.psbt checksig
+	$(GEN_SP) $(SP_SEED) $(SP_DIR)/p2tr_script_path_csv.psbt csv
+	$(GEN_SP) $(SP_SEED) $(SP_DIR)/p2tr_script_path_cltv.psbt cltv
+	$(GEN_SP) $(SP_SEED) $(SP_DIR)/p2tr_script_path_csv_cltv.psbt csv_cltv
+	$(GEN_SP) $(SP_SEED) $(SP_DIR)/p2tr_script_path_reject_noleaf.psbt reject_noleaf
+
+test-scriptpath: fktsigner gen-scriptpath-fixtures
+	./fktsigner $(SP_SEED) "m/86'/1'/0'/0/0" $(SP_DIR)/p2tr_script_path_synthetic.psbt $(SP_OUT)/p2tr_script_path_synthetic.psbt
+	@echo "PASS test-scriptpath (checksig)"
+
+# Ark-shaped leaves: CSV / CLTV / both + reject no-leaf
+test-scriptpath-ark: fktsigner gen-scriptpath-fixtures
+	./fktsigner $(SP_SEED) "m/86'/1'/0'/0/0" $(SP_DIR)/p2tr_script_path_csv.psbt $(SP_OUT)/p2tr_script_path_csv.psbt
+	./fktsigner $(SP_SEED) "m/86'/1'/0'/0/0" $(SP_DIR)/p2tr_script_path_cltv.psbt $(SP_OUT)/p2tr_script_path_cltv.psbt
+	./fktsigner $(SP_SEED) "m/86'/1'/0'/0/0" $(SP_DIR)/p2tr_script_path_csv_cltv.psbt $(SP_OUT)/p2tr_script_path_csv_cltv.psbt
+	@# reject: must fail
+	@if ./fktsigner $(SP_SEED) "m/86'/1'/0'/0/0" $(SP_DIR)/p2tr_script_path_reject_noleaf.psbt $(SP_OUT)/p2tr_script_path_reject_noleaf.psbt 2>/dev/null; then \
+		echo "FAIL: reject_noleaf should not sign"; exit 1; \
+	else \
+		echo "PASS reject_noleaf (signer aborted as expected)"; \
+	fi
+	@echo "PASS test-scriptpath-ark"
 
 # Linux pure-CLI (sign --seed --yes) is the same crypto path as TUI (from_words).
 test-parity-linux: fktsigner

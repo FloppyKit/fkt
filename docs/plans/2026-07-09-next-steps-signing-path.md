@@ -58,10 +58,10 @@ Goal: prove script-path is not only “one synthetic CHECKSIG” but **timelock-
 
 | # | Package | Type | Done when |
 |---|---------|------|-----------|
-| P1.1 | Spec bark-like leaf templates (DelayedSign / TimelockSign / DelayedTimelockSign **shapes only** — not full bark consensus) | docs | Short leaf encoding table in plan or `docs/plans/…-ark-leaves.md` |
-| P1.2 | Synthetic generators: leaf with `OP_CHECKSIG` + CSV and/or CLTV prefixes; valid control block + merkle root | tooling | `make test-scriptpath-ark-synth` or extended `test-scriptpath` |
-| P1.3 | Harness cases `expect=sign` for those fixtures; reject cases (tree, no leaf; wrong seed) | test | Matrix green; no golden break on keypath |
-| P1.4 | Tag **`v0.2.1`** if only fixtures; **`v0.3.0`** if we also land proprietary passthrough (see P2) | release | Version policy |
+| P1.1 | Spec bark-like leaf templates (DelayedSign / TimelockSign / DelayedTimelockSign **shapes only** — not full bark consensus) | docs | **Done** — `docs/plans/2026-07-09-ark-shaped-scriptpath-leaves.md` |
+| P1.2 | Synthetic generators: leaf with `OP_CHECKSIG` + CSV and/or CLTV prefixes; valid control block + merkle root | tooling | **Done** — `make gen-scriptpath-fixtures` / `test-scriptpath-ark` |
+| P1.3 | Harness cases `expect=sign` for those fixtures; reject cases (tree, no leaf; wrong seed) | test | **Done** — harness PASS includes csv/cltv/csv_cltv + reject_noleaf |
+| P1.4 | Tag **`v0.2.1`** if only fixtures; **`v0.3.0`** if we also land proprietary passthrough (see P2) | release | **v0.2.1** tagged after P1 |
 
 **Why before faucet:** offline correctness of sighash + witness stack is the real gate for exit claims.
 
@@ -132,7 +132,7 @@ Checklist:
 
 - [x] Keypath matrix green (Linux)  
 - [x] Script-path single-leaf synthetic green  
-- [ ] Script-path CSV/CLTV-shaped leaves green  
+- [x] Script-path CSV/CLTV-shaped leaves green  
 - [ ] Proprietary keys survive sign  
 - [ ] At least one bark-shaped or live exit-claim vector signed  
 - [ ] Matt DOS smoke (nice-to-have, not gate)  

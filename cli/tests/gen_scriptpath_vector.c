@@ -1,11 +1,15 @@
 /*
- * gen_scriptpath_vector.c — build a synthetic single-leaf script-path PSBT.
+ * gen_scriptpath_vector.c — synthetic single-leaf script-path PSBTs.
  *
- * Leaf: <xonly_pk> OP_CHECKSIG
- * Internal key = leaf key (single-leaf tree)
- * Path: m/86'/1'/0'/0/0 from test seed (call release...)
+ * Leaf kinds (bark-shaped, not production bark):
+ *   checksig  — <P> OP_CHECKSIG
+ *   csv       — <10> OP_CSV OP_DROP <P> OP_CHECKSIG
+ *   cltv      — <100> OP_CLTV OP_DROP <P> OP_CHECKSIG
+ *   csv_cltv  — both delays then CHECKSIG
+ *   reject_noleaf — merkle root only (for expect=reject harness)
  *
- * Usage: ./gen_scriptpath_vector <seed_hex128> <out.psbt>
+ * Path: m/86'/1'/0'/0/0 from BIP39 seed hex.
+ * Usage: ./gen_scriptpath_vector <seed_hex128> <out.psbt> [kind]
  */
 #include "../fkt_bip32.h"
 #include "../fkt_secp256k1.h"
@@ -16,6 +20,22 @@
 #include <stdlib.h>
 #include <secp256k1.h>
 #include <secp256k1_extrakeys.h>
+
+/* fkt_memzero.o may reference UI restore on SIGINT — stub for this tool. */
+void fkt_ui_term_restore(void) {}
+
+#define OP_DROP   0x75
+#define OP_CLTV   0xb1
+#define OP_CSV    0xb2
+#define OP_CHECKSIG 0xac
+
+enum leaf_kind {
+    KIND_CHECKSIG = 0,
+    KIND_CSV,
+    KIND_CLTV,
+    KIND_CSV_CLTV,
+    KIND_REJECT_NOLEAF
+};
 
 static int hex_decode(const char *hex, uint8_t *out, int max_out) {
     int len = (int)strlen(hex);
@@ -58,18 +78,65 @@ static size_t append_kv(uint8_t *buf, size_t pos, size_t max,
     return pos;
 }
 
+static enum leaf_kind parse_kind(const char *s) {
+    if (!s || !s[0] || strcmp(s, "checksig") == 0)
+        return KIND_CHECKSIG;
+    if (strcmp(s, "csv") == 0)
+        return KIND_CSV;
+    if (strcmp(s, "cltv") == 0)
+        return KIND_CLTV;
+    if (strcmp(s, "csv_cltv") == 0 || strcmp(s, "csv+cltv") == 0)
+        return KIND_CSV_CLTV;
+    if (strcmp(s, "reject_noleaf") == 0 || strcmp(s, "noleaf") == 0)
+        return KIND_REJECT_NOLEAF;
+    fprintf(stderr, "unknown kind '%s' (checksig|csv|cltv|csv_cltv|reject_noleaf)\n", s);
+    exit(1);
+    return KIND_CHECKSIG;
+}
+
+/* Build leaf script; returns length. xonly is 32 bytes. */
+static size_t build_leaf_script(enum leaf_kind kind, const uint8_t xonly[32],
+                                uint8_t *script, size_t script_max) {
+    size_t p = 0;
+
+    if (kind == KIND_CSV || kind == KIND_CSV_CLTV) {
+        /* <10> OP_CSV OP_DROP */
+        if (p + 4 > script_max) return 0;
+        script[p++] = 0x01;
+        script[p++] = 0x0a;
+        script[p++] = OP_CSV;
+        script[p++] = OP_DROP;
+    }
+    if (kind == KIND_CLTV || kind == KIND_CSV_CLTV) {
+        /* <100> OP_CLTV OP_DROP */
+        if (p + 4 > script_max) return 0;
+        script[p++] = 0x01;
+        script[p++] = 0x64;
+        script[p++] = OP_CLTV;
+        script[p++] = OP_DROP;
+    }
+    /* <P> OP_CHECKSIG */
+    if (p + 34 > script_max) return 0;
+    script[p++] = 0x20;
+    memcpy(script + p, xonly, 32);
+    p += 32;
+    script[p++] = OP_CHECKSIG;
+    return p;
+}
+
 int main(int argc, char **argv) {
     uint8_t seed[64];
     uint8_t child_priv[32], child_pub33[33], xonly[32];
-    uint8_t leaf_script[34];
+    uint8_t leaf_script[128];
+    size_t leaf_len = 0;
     uint8_t leaf_hash[32];
     uint8_t tweak_in[64], tweak[32];
     uint8_t control[33];
-    uint8_t leaf_val[35];
+    uint8_t leaf_val[129];
     uint8_t spk[34];
     uint8_t tx[128];
     uint8_t wutxo[8 + 1 + 34];
-    uint8_t psbt[1024];
+    uint8_t psbt[2048];
     size_t pos, tlen;
     uint8_t key_buf[40];
     uint8_t tap_bip32_val[1 + 4 + 5 * 4];
@@ -78,40 +145,53 @@ int main(int argc, char **argv) {
     secp256k1_keypair keypair;
     secp256k1_xonly_pubkey xpub;
     int pk_parity;
-    const char *path = "m/86'/1'/0'/0/0";
+    const char *bip_path = "m/86'/1'/0'/0/0";
     uint32_t path_idx[5];
     int i;
+    enum leaf_kind kind;
+    uint32_t nsequence;
+    uint32_t nlocktime;
+    const char *kind_name;
 
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <seed_hex128> <out.psbt>\n", argv[0]);
+    if (argc < 3 || argc > 4) {
+        fprintf(stderr,
+                "Usage: %s <seed_hex128> <out.psbt> [checksig|csv|cltv|csv_cltv|reject_noleaf]\n",
+                argv[0]);
         return 1;
     }
     if (hex_decode(argv[1], seed, 64) != 64) {
         fprintf(stderr, "bad seed hex\n");
         return 1;
     }
+    kind = parse_kind(argc == 4 ? argv[3] : "checksig");
+    kind_name = (argc == 4) ? argv[3] : "checksig";
 
     fkt_secp256k1_init();
     ctx = fkt_secp256k1_ctx();
 
-    if (fkt_derive_from_path(seed, path, child_priv, child_pub33, NULL) != 0) {
+    if (fkt_derive_from_path(seed, bip_path, child_priv, child_pub33, NULL) != 0) {
         fprintf(stderr, "derive failed\n");
         return 1;
     }
-    /* x-only from compressed pubkey (drop prefix) */
     memcpy(xonly, child_pub33 + 1, 32);
 
-    /* leaf script: OP_PUSH32 xonly OP_CHECKSIG */
-    leaf_script[0] = 0x20;
-    memcpy(leaf_script + 1, xonly, 32);
-    leaf_script[33] = 0xac;
-
-    if (fkt_tapleaf_hash(0xc0, leaf_script, 34, leaf_hash) != 0) {
-        fprintf(stderr, "tapleaf hash failed\n");
-        return 1;
+    if (kind != KIND_REJECT_NOLEAF) {
+        leaf_len = build_leaf_script(kind, xonly, leaf_script, sizeof(leaf_script));
+        if (leaf_len == 0) {
+            fprintf(stderr, "leaf build failed\n");
+            return 1;
+        }
+        if (fkt_tapleaf_hash(0xc0, leaf_script, leaf_len, leaf_hash) != 0) {
+            fprintf(stderr, "tapleaf hash failed\n");
+            return 1;
+        }
+    } else {
+        /* Dummy merkle root so 0x18 is present without a leaf */
+        memset(leaf_hash, 0xab, 32);
+        leaf_len = 0;
     }
 
-    /* single-leaf: merkle_root = tapleaf_hash; tweak internal||merkle */
+    /* single-leaf: merkle_root = tapleaf_hash (or dummy for reject) */
     memcpy(tweak_in, xonly, 32);
     memcpy(tweak_in + 32, leaf_hash, 32);
     if (fkt_tagged_sha256("TapTweak", 8, tweak_in, 64, tweak) != 0) {
@@ -133,39 +213,55 @@ int main(int argc, char **argv) {
         memcpy(spk + 2, out_xonly, 32);
     }
 
-    /* control block: (leaf_version | parity) || internal_key */
     control[0] = (uint8_t)(0xc0 | (pk_parity ? 1 : 0));
     memcpy(control + 1, xonly, 32);
 
-    /* leaf value: script || leaf_version */
-    memcpy(leaf_val, leaf_script, 34);
-    leaf_val[34] = 0xc0;
+    if (kind != KIND_REJECT_NOLEAF) {
+        memcpy(leaf_val, leaf_script, leaf_len);
+        leaf_val[leaf_len] = 0xc0;
+    }
 
-    /* fake prevout + unsigned tx: version=2, 1 in, 1 out, lock=0 */
+    /* Sequence / locktime per leaf kind */
+    nsequence = 0xfffffffdU;
+    nlocktime = 0;
+    if (kind == KIND_CSV || kind == KIND_CSV_CLTV)
+        nsequence = 10;
+    if (kind == KIND_CLTV || kind == KIND_CSV_CLTV) {
+        nlocktime = 100;
+        if (kind == KIND_CLTV)
+            nsequence = 0xfffffffeU;
+    }
+
+    /* unsigned tx */
     {
         uint8_t prev_txid[32];
         uint64_t amt;
         int j;
         memset(prev_txid, 0x11, 32);
+        prev_txid[0] = (uint8_t)kind; /* distinct prev per kind */
         pos = 0;
-        tx[pos++] = 2; tx[pos++] = 0; tx[pos++] = 0; tx[pos++] = 0; /* version */
-        tx[pos++] = 1; /* nIn */
+        tx[pos++] = 2; tx[pos++] = 0; tx[pos++] = 0; tx[pos++] = 0;
+        tx[pos++] = 1;
         memcpy(tx + pos, prev_txid, 32); pos += 32;
-        tx[pos++] = 0; tx[pos++] = 0; tx[pos++] = 0; tx[pos++] = 0; /* vout */
-        tx[pos++] = 0; /* empty scriptSig compact size */
-        /* sequence 0xfffffffd */
-        tx[pos++] = 0xfd; tx[pos++] = 0xff; tx[pos++] = 0xff; tx[pos++] = 0xff;
-        tx[pos++] = 1; /* nOut */
+        tx[pos++] = 0; tx[pos++] = 0; tx[pos++] = 0; tx[pos++] = 0;
+        tx[pos++] = 0; /* empty scriptSig */
+        tx[pos++] = (uint8_t)(nsequence & 0xFF);
+        tx[pos++] = (uint8_t)((nsequence >> 8) & 0xFF);
+        tx[pos++] = (uint8_t)((nsequence >> 16) & 0xFF);
+        tx[pos++] = (uint8_t)((nsequence >> 24) & 0xFF);
+        tx[pos++] = 1;
         amt = 10000;
         for (j = 0; j < 8; j++)
             tx[pos++] = (uint8_t)((amt >> (8 * j)) & 0xFF);
         tx[pos++] = 34;
         memcpy(tx + pos, spk, 34); pos += 34;
-        tx[pos++] = 0; tx[pos++] = 0; tx[pos++] = 0; tx[pos++] = 0; /* locktime */
+        tx[pos++] = (uint8_t)(nlocktime & 0xFF);
+        tx[pos++] = (uint8_t)((nlocktime >> 8) & 0xFF);
+        tx[pos++] = (uint8_t)((nlocktime >> 16) & 0xFF);
+        tx[pos++] = (uint8_t)((nlocktime >> 24) & 0xFF);
         tlen = pos;
     }
 
-    /* witness utxo value */
     {
         uint64_t amt = 20000;
         int j;
@@ -175,14 +271,13 @@ int main(int argc, char **argv) {
         memcpy(wutxo + 9, spk, 34);
     }
 
-    /* tap bip32 value: n_hashes=0, fingerprint dummy, path indices */
     path_idx[0] = 86u | 0x80000000u;
     path_idx[1] = 1u | 0x80000000u;
     path_idx[2] = 0u | 0x80000000u;
     path_idx[3] = 0;
     path_idx[4] = 0;
-    tap_bip32_val[0] = 0; /* no leaf hashes in value for this path binding style */
-    memset(tap_bip32_val + 1, 0x95, 4); /* fake fp */
+    tap_bip32_val[0] = 0;
+    memset(tap_bip32_val + 1, 0x95, 4);
     for (i = 0; i < 5; i++) {
         uint32_t v = path_idx[i];
         tap_bip32_val[5 + i * 4 + 0] = (uint8_t)(v & 0xFF);
@@ -191,42 +286,39 @@ int main(int argc, char **argv) {
         tap_bip32_val[5 + i * 4 + 3] = (uint8_t)((v >> 24) & 0xFF);
     }
 
-    /* Build PSBT */
     pos = 0;
     memcpy(psbt, "psbt\xff", 5); pos = 5;
-    /* global unsigned tx */
     key_buf[0] = 0x00;
     pos = append_kv(psbt, pos, sizeof(psbt), key_buf, 1, tx, tlen);
     if (!pos) return 1;
-    psbt[pos++] = 0x00; /* end global */
+    psbt[pos++] = 0x00;
 
-    /* input map */
-    key_buf[0] = 0x01; /* WITNESS_UTXO */
+    key_buf[0] = 0x01;
     pos = append_kv(psbt, pos, sizeof(psbt), key_buf, 1, wutxo, 8 + 1 + 34);
     if (!pos) return 1;
 
-    key_buf[0] = 0x17; /* TAP_INTERNAL_KEY */
+    key_buf[0] = 0x17;
     pos = append_kv(psbt, pos, sizeof(psbt), key_buf, 1, xonly, 32);
     if (!pos) return 1;
 
-    key_buf[0] = 0x18; /* TAP_MERKLE_ROOT */
+    key_buf[0] = 0x18;
     pos = append_kv(psbt, pos, sizeof(psbt), key_buf, 1, leaf_hash, 32);
     if (!pos) return 1;
 
-    /* TAP_LEAF_SCRIPT: key = 0x15 || control */
-    key_buf[0] = 0x15;
-    memcpy(key_buf + 1, control, 33);
-    pos = append_kv(psbt, pos, sizeof(psbt), key_buf, 34, leaf_val, 35);
-    if (!pos) return 1;
+    if (kind != KIND_REJECT_NOLEAF) {
+        key_buf[0] = 0x15;
+        memcpy(key_buf + 1, control, 33);
+        pos = append_kv(psbt, pos, sizeof(psbt), key_buf, 34, leaf_val, leaf_len + 1);
+        if (!pos) return 1;
+    }
 
-    /* TAP_BIP32_DERIVATION: key = 0x16 || xonly */
     key_buf[0] = 0x16;
     memcpy(key_buf + 1, xonly, 32);
     pos = append_kv(psbt, pos, sizeof(psbt), key_buf, 33, tap_bip32_val, 1 + 4 + 20);
     if (!pos) return 1;
 
-    psbt[pos++] = 0x00; /* end input */
-    psbt[pos++] = 0x00; /* empty output map */
+    psbt[pos++] = 0x00;
+    psbt[pos++] = 0x00;
 
     f = fopen(argv[2], "wb");
     if (!f) {
@@ -235,6 +327,8 @@ int main(int argc, char **argv) {
     }
     fwrite(psbt, 1, pos, f);
     fclose(f);
-    fprintf(stderr, "wrote %s (%zu bytes) script-path synthetic\n", argv[2], pos);
+    fprintf(stderr, "wrote %s (%zu bytes) kind=%s leaf_len=%zu seq=%u lock=%u\n",
+            argv[2], pos, kind_name, leaf_len,
+            (unsigned)nsequence, (unsigned)nlocktime);
     return 0;
 }
