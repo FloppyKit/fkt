@@ -68,10 +68,8 @@ warm:
 fkt: fktsigner
 	ln -sf fktsigner fkt
 
-FUZZ_OBJS = fkt_seed.o fkt_bip39.o fkt_error.o fkt_util.o fkt_sha256.o fkt_sha512.o \
-            fkt_hmac.o fkt_pbkdf2.o fkt_ripemd160.o fkt_hash160.o fkt_bip32.o \
-            fkt_secp256k1.o fkt_psbt.o fkt_preview.o fkt_confirm.o fkt_finalizer.o \
-            fkt_memzero.o fkt_sighash.o fkt_signer.o
+# Full app minus main — preview/confirm/seed now pull in UI/TTY/QR.
+FUZZ_OBJS = $(filter-out main.o,$(OBJS))
 
 FUZZ_CC := $(shell command -v clang 2>/dev/null)
 ifneq ($(FUZZ_CC),)
@@ -144,7 +142,7 @@ fuzz-corpus:
 	python3 tests/fuzz/seed_corpus.py
 
 fuzz: fkt_fuzz fuzz-corpus
-	./fkt_fuzz -max_len=4096 -runs=10000 corpus/
+	./fkt_fuzz -max_len=4096 -runs=50000 corpus/
 
 clean:
 	rm -f *.o fktsigner verify_ecdsa fkt_fuzz test_parse psbt_parse_test test_qr

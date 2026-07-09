@@ -250,37 +250,130 @@ static int fkt_fuzz_collect_corpus(const char *dir, char paths[][1024], int max_
     return n;
 }
 
+/* Simple xorshift32 for deterministic mutational fuzz without libFuzzer. */
+static uint32_t fkt_fuzz_rng_state = 0xC0FFEEu;
+
+static uint32_t fkt_fuzz_rng(void) {
+    uint32_t x = fkt_fuzz_rng_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    fkt_fuzz_rng_state = x;
+    return x;
+}
+
+static void fkt_fuzz_mutate(uint8_t *buf, size_t len, size_t max_len, size_t *out_len) {
+    unsigned op;
+    size_t n = len;
+    size_t i;
+    size_t k;
+
+    if (n == 0) {
+        *out_len = 0;
+        return;
+    }
+    op = fkt_fuzz_rng() % 6;
+    switch (op) {
+    case 0: /* bit flip */
+        i = fkt_fuzz_rng() % n;
+        buf[i] ^= (uint8_t)(1u << (fkt_fuzz_rng() % 8));
+        break;
+    case 1: /* interesting byte */
+        i = fkt_fuzz_rng() % n;
+        buf[i] = (uint8_t)(fkt_fuzz_rng() & 0xFF);
+        break;
+    case 2: /* multi-byte scramble */
+        k = 1 + (fkt_fuzz_rng() % 8);
+        for (i = 0; i < k; i++) {
+            size_t j = fkt_fuzz_rng() % n;
+            buf[j] = (uint8_t)(fkt_fuzz_rng() & 0xFF);
+        }
+        break;
+    case 3: /* truncate */
+        if (n > 1)
+            n = 1 + (fkt_fuzz_rng() % n);
+        break;
+    case 4: /* append noise */
+        k = 1 + (fkt_fuzz_rng() % 16);
+        for (i = 0; i < k && n < max_len; i++)
+            buf[n++] = (uint8_t)(fkt_fuzz_rng() & 0xFF);
+        break;
+    default: /* clone+swap two bytes */
+        if (n >= 2) {
+            size_t a = fkt_fuzz_rng() % n;
+            size_t b = fkt_fuzz_rng() % n;
+            uint8_t t = buf[a];
+            buf[a] = buf[b];
+            buf[b] = t;
+        }
+        break;
+    }
+    *out_len = n;
+}
+
 static int fkt_fuzz_run_corpus(const char *dir, int max_len, unsigned runs) {
     char paths[FKT_FUZZ_MAX_CORPUS][1024];
     int nfiles;
     unsigned count = 0;
     int i;
+    uint8_t *seeds[FKT_FUZZ_MAX_CORPUS];
+    size_t seed_lens[FKT_FUZZ_MAX_CORPUS];
+    int nseeds = 0;
 
     nfiles = fkt_fuzz_collect_corpus(dir, paths, FKT_FUZZ_MAX_CORPUS);
     if (nfiles < 0) return -1;
 
     fkt_secp256k1_init();
 
-    while (count < runs) {
-        for (i = 0; i < nfiles && count < runs; i++) {
-            uint8_t *blob;
-            size_t len;
-
-            if (fkt_read_file_blob(paths[i], &blob, &len) != 0)
-                continue;
-            if (len > (size_t)max_len) {
-                free(blob);
-                continue;
-            }
-            fkt_fuzz_one_input(blob, len);
+    /* Load seeds into memory for mutation. */
+    for (i = 0; i < nfiles; i++) {
+        uint8_t *blob;
+        size_t len;
+        if (fkt_read_file_blob(paths[i], &blob, &len) != 0)
+            continue;
+        if (len == 0 || len > (size_t)max_len) {
             free(blob);
-            count++;
+            continue;
         }
-        if (nfiles == 0)
-            break;
+        seeds[nseeds] = blob;
+        seed_lens[nseeds] = len;
+        nseeds++;
     }
-    printf("Smoke fuzz: %u harness invocations (%d seeds, max_len=%d)\n",
-           count, nfiles, max_len);
+    if (nseeds == 0) {
+        printf("Smoke fuzz: no usable seeds in %s\n", dir);
+        return -1;
+    }
+
+    /* Pass 1: clean seeds once each. */
+    for (i = 0; i < nseeds && count < runs; i++) {
+        fkt_fuzz_one_input(seeds[i], seed_lens[i]);
+        count++;
+    }
+
+    /* Pass 2+: mutational fuzz (gcc path — no libFuzzer on this host). */
+    while (count < runs) {
+        uint8_t mut[FKT_FUZZ_MAX_INPUT];
+        size_t base_i = fkt_fuzz_rng() % (unsigned)nseeds;
+        size_t n = seed_lens[base_i];
+        size_t mut_len;
+        unsigned rounds;
+        unsigned r;
+
+        if (n > (size_t)max_len)
+            n = (size_t)max_len;
+        memcpy(mut, seeds[base_i], n);
+        rounds = 1 + (fkt_fuzz_rng() % 4);
+        for (r = 0; r < rounds; r++)
+            fkt_fuzz_mutate(mut, n, (size_t)max_len, &mut_len), n = mut_len;
+        fkt_fuzz_one_input(mut, n);
+        count++;
+    }
+
+    for (i = 0; i < nseeds; i++)
+        free(seeds[i]);
+
+    printf("Mutational fuzz: %u invocations (%d seeds, max_len=%d)\n",
+           count, nseeds, max_len);
     return 0;
 }
 
