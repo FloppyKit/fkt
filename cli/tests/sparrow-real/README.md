@@ -117,7 +117,7 @@ cd cli && make test-sparrow-real-list
 | `p2tr_1in_1out` | sign | call_release | BIP86 key-path |
 | `p2tr_2in_2out` | sign | call_release | Multi-in TR |
 | `p2tr_rbf` | sign | call_release | RBF + TR |
-| `mixed_p2wpkh_p2tr_2in_2out` | sign | call_release | **Critical mixed** |
+| `mixed_p2wpkh_p2tr_2in_2out` | sign | call_release | **TRUE mixed** P2WPKH+P2TR inputs (merged legs) |
 
 **Present and prioritized next (medium / prep):**
 

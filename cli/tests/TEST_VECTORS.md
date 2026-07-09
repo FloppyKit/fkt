@@ -38,7 +38,7 @@ Canonical IDs match `sparrow-real/manifest.json` (not always `v1_` prefix).
 | V1-H06 | `p2tr_1in_1out` | P2TR | [x] | [x] | [x] | [x] | byte-equal Sparrow; `call release` |
 | V1-H07 | `p2tr_2in_2out` | P2TR | [x] | [x] | [x] | [x] | |
 | V1-H08 | `p2tr_rbf` | P2TR | [x] | [x] | [x] | [x] | |
-| V1-H09 | `mixed_p2wpkh_p2tr_2in_2out` | Mixed* | [x] | [x] | [x] | [x] | *current fixture is multi-P2WPKH under mixed name |
+| V1-H09 | `mixed_p2wpkh_p2tr_2in_2out` | Mixed | [x] | [ ] | [x] | [x] | **TRUE** mixed: P2WPKH+P2TR inputs (merged from Sparrow legs; no single Sparrow-signed) |
 
 ### Medium / low (default harness)
 

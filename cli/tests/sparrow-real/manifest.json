@@ -231,7 +231,7 @@
     {
       "id": "mixed_p2wpkh_p2tr_2in_2out",
       "unsigned": "unsigned/mixed_p2wpkh_p2tr_2in_2out.psbt",
-      "sparrow_signed": "sparrow-signed/mixed_p2wpkh_p2tr_2in_2out.psbt",
+      "sparrow_signed": null,
       "fkt_signed": "fkt-signed/mixed_p2wpkh_p2tr_2in_2out.psbt",
       "expect": "sign",
       "script": "mixed_p2wpkh_p2tr",
@@ -239,14 +239,18 @@
       "seed_ref": "call_release",
       "seed_env": "FKT_SPARROW_SEED",
       "legacy_source": {
-        "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out.psbt",
-        "signed": "Signed/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-signed.psbt"
+        "unsigned": "Unsigned/v1/mixed_p2wpkh_p2tr_2in_2out_true.psbt",
+        "legs": [
+          "Unsigned/v1/mixed-leg-p2wpkh-unsigned.psbt",
+          "Unsigned/v1/mixed-leg-p2tr-unsigned.psbt"
+        ],
+        "signed": null
       },
-      "notes": "CRITICAL multi-input case from Sparrow mixed export name. Current fixture witness UTXOs are both P2WPKH (0014\u2026); still required High. Re-export true P2WPKH+P2TR when available.",
+      "notes": "TRUE mixed: input0 P2WPKH m/84'/1'/0'/0/14 + input1 P2TR keypath m/86' (merged from mixed-leg-p2wpkh + mixed-leg-p2tr Sparrow exports). Fingerprint 9581fdb1 (call release).",
       "fkt_signed_status": "golden",
       "checklist": {
         "unsigned": true,
-        "sparrow_signed": true,
+        "sparrow_signed": false,
         "fkt_signed": true,
         "verified": true
       }
@@ -507,7 +511,7 @@
       "sparrow_signed": null,
       "fkt_signed": "fkt-signed/mixed_p2wpkh_p2tr_2in_2out_rbf_off.psbt",
       "expect": "sign",
-      "script": "mixed_p2wpkh_p2tr",
+      "script": "p2wpkh",
       "priority": "bonus",
       "seed_ref": "call_release",
       "seed_env": "FKT_SPARROW_SEED",
@@ -515,7 +519,7 @@
         "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-rbf-off.psbt",
         "signed": null
       },
-      "notes": "RBF off variant (inspect: may be multi-P2WPKH under mixed name)"
+      "notes": "RBF off variant (inspect: may be multi-P2WPKH under mixed name) LEGACY false-mixed (both inputs P2WPKH). Kept as bonus multi-wpkh; not true P2TR input."
     },
     {
       "id": "mixed_p2wpkh_p2tr_2in_2out_locktime_on",
@@ -523,7 +527,7 @@
       "sparrow_signed": null,
       "fkt_signed": "fkt-signed/mixed_p2wpkh_p2tr_2in_2out_locktime_on.psbt",
       "expect": "sign",
-      "script": "mixed_p2wpkh_p2tr",
+      "script": "p2wpkh",
       "priority": "bonus",
       "seed_ref": "call_release",
       "seed_env": "FKT_SPARROW_SEED",
@@ -531,7 +535,7 @@
         "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-locktime-on.psbt",
         "signed": null
       },
-      "notes": "Locktime on variant (inspect: may be multi-P2WPKH under mixed name)"
+      "notes": "Locktime on variant (inspect: may be multi-P2WPKH under mixed name) LEGACY false-mixed (both inputs P2WPKH). Kept as bonus multi-wpkh; not true P2TR input."
     },
     {
       "id": "mixed_p2wpkh_p2tr_2in_2out_all_anyonecanpay",
@@ -539,7 +543,7 @@
       "sparrow_signed": null,
       "fkt_signed": "fkt-signed/mixed_p2wpkh_p2tr_2in_2out_all_anyonecanpay.psbt",
       "expect": "sign",
-      "script": "mixed_p2wpkh_p2tr",
+      "script": "p2wpkh",
       "priority": "bonus",
       "seed_ref": "call_release",
       "seed_env": "FKT_SPARROW_SEED",
@@ -547,7 +551,7 @@
         "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-all-anyonecanpay.psbt",
         "signed": null
       },
-      "notes": "SIGHASH_ANYONECANPAY all inputs (inspect: may be multi-P2WPKH under mixed name)"
+      "notes": "SIGHASH_ANYONECANPAY all inputs (inspect: may be multi-P2WPKH under mixed name) LEGACY false-mixed (both inputs P2WPKH). Kept as bonus multi-wpkh; not true P2TR input."
     },
     {
       "id": "p2sh_p2wpkh_rbf_off",
@@ -644,10 +648,46 @@
         "signed": null
       },
       "notes": "Named scriptpath in Sparrow export but PSBT is key-path (TAP_INTERNAL_KEY 0x17, no 0x18/0x15). FKT keypath-signs; matches Sparrow keypath witness. Real script-path fixtures TODO for 0.2."
+    },
+    {
+      "id": "mixed_leg_p2wpkh",
+      "unsigned": "unsigned/mixed-leg-p2wpkh-unsigned.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/mixed_leg_p2wpkh.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "notes": "Source leg for true mixed merge; BIP84 single-input"
+    },
+    {
+      "id": "mixed_leg_p2tr",
+      "unsigned": "unsigned/mixed-leg-p2tr-unsigned.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/mixed_leg_p2tr.psbt",
+      "expect": "sign",
+      "script": "p2tr",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "notes": "Source leg for true mixed merge; BIP86 keypath single-input"
+    },
+    {
+      "id": "mixed_p2wpkh_p2tr_2in_2out_false_multi_wpkh",
+      "unsigned": "unsigned/mixed_p2wpkh_p2tr_2in_2out_false_multi_wpkh.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/mixed_p2wpkh_p2tr_2in_2out_false_multi_wpkh.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "bonus",
+      "seed_ref": "call_release",
+      "seed_env": "FKT_SPARROW_SEED",
+      "notes": "Archived prior \"mixed\" that was multi-P2WPKH only (P2TR was output, not input)"
     }
   ],
   "golden_set": {
-    "description": "Committed FKT-signed goldens for default harness (high+medium+low with known seeds)",
+    "description": "Committed FKT-signed goldens for default harness; mixed is TRUE p2wpkh+p2tr inputs",
     "ids": [
       "mixed_p2wpkh_p2tr_2in_2out",
       "p2sh_p2wpkh_1in_1out",
