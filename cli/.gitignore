@@ -18,3 +18,13 @@ test_qr
 psbt_parse_test
 poppy
 poppy.qr.pbm
+CWSDPMI.*
+*.SWP
+OUT.TXT
+SHAFT
+SMOKE.TXT
+csdpmi7b.zip
+tests/gen_scriptpath_vector
+bin/
+manifest/
+&1
