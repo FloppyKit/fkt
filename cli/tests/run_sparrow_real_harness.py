@@ -437,7 +437,7 @@ def evaluate_sign(case, unsigned_raw, signed_path, sparrow_path):
     return False, "no signature material"
 
 
-def run_case(case, seeds_meta, dry_run=False):
+def run_case(case, seeds_meta, dry_run=False, check_golden=False):
     cid = case["id"]
     expect = case.get("expect", "sign")
     seed_ref = case.get("seed_ref", "unknown")
@@ -445,6 +445,7 @@ def run_case(case, seeds_meta, dry_run=False):
     fkt_out = os.path.join(ROOT, case.get("fkt_signed") or ("fkt-signed/%s.psbt" % cid))
     spr = case.get("sparrow_signed")
     sparrow_path = os.path.join(ROOT, spr) if spr else None
+    golden_path = fkt_out  # committed golden lives at fkt-signed/<id>.psbt
 
     if not os.path.isfile(unsigned):
         return "FAIL", cid, "missing unsigned %s" % unsigned
@@ -457,6 +458,13 @@ def run_case(case, seeds_meta, dry_run=False):
         return "DRY", cid, "seed=%s expect=%s" % (seed_src, expect)
 
     os.makedirs(os.path.dirname(fkt_out), exist_ok=True)
+
+    # Snapshot committed golden before overwrite (if checking)
+    golden_bytes = None
+    if check_golden and os.path.isfile(golden_path):
+        with open(golden_path, "rb") as gf:
+            golden_bytes = gf.read()
+
     rc, err = sign_case(seed_hex, unsigned, fkt_out)
 
     if expect == "reject":
@@ -470,9 +478,22 @@ def run_case(case, seeds_meta, dry_run=False):
 
     unsigned_raw = open(unsigned, "rb").read()
     ok, detail = evaluate_sign(case, unsigned_raw, fkt_out, sparrow_path)
-    if ok:
-        return "PASS", cid, detail
-    return "FAIL", cid, detail
+    if not ok:
+        return "FAIL", cid, detail
+
+    if check_golden:
+        if golden_bytes is None:
+            # Only enforce for cases marked golden in manifest
+            if case.get("fkt_signed_status") == "golden":
+                return "FAIL", cid, "missing committed golden at %s" % golden_path
+        else:
+            with open(fkt_out, "rb") as nf:
+                new_bytes = nf.read()
+            if new_bytes != golden_bytes:
+                return "FAIL", cid, "golden mismatch (regen differs from committed fkt-signed)"
+            detail = detail + "; golden match"
+
+    return "PASS", cid, detail
 
 
 def main():
@@ -493,6 +514,11 @@ def main():
         "--list-only",
         action="store_true",
         help="Only list cases (no sign); same as sparrow_real_list",
+    )
+    ap.add_argument(
+        "--check-golden",
+        action="store_true",
+        help="After sign, require output byte-equal to committed fkt-signed golden",
     )
     args = ap.parse_args()
 
@@ -542,7 +568,12 @@ def main():
                 % (case["id"], "LIST", case.get("expect"), case.get("seed_ref"))
             )
             continue
-        status, cid, detail = run_case(case, seeds_meta, dry_run=args.dry_run)
+        status, cid, detail = run_case(
+            case,
+            seeds_meta,
+            dry_run=args.dry_run,
+            check_golden=args.check_golden,
+        )
         print("%-42s %-6s %s" % (cid, status, detail))
         if status == "PASS":
             passed += 1

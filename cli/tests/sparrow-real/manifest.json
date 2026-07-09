@@ -58,7 +58,14 @@
         "unsigned": "Unsigned/v1/v1_p2wpkh_1in_1out.psbt",
         "signed": "Signed/v1/v1_p2wpkh_1in_1out.psbt"
       },
-      "notes": "BIP84 baseline; older Sparrow export"
+      "notes": "BIP84 baseline; older Sparrow export",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2wpkh_2in_2out",
@@ -74,7 +81,14 @@
         "unsigned": "Unsigned/v1/v1_p2wpkh_2in_2out.psbt",
         "signed": "Signed/v1/v1_p2wpkh_2in_2out.psbt"
       },
-      "notes": "Multi-input + change"
+      "notes": "Multi-input + change",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2wpkh_rbf",
@@ -90,7 +104,14 @@
         "unsigned": "Unsigned/v1/v1_p2wpkh_rbf.psbt",
         "signed": "Signed/v1/v1_p2wpkh_rbf.psbt"
       },
-      "notes": "RBF enabled"
+      "notes": "RBF enabled",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2wpkh_locktime",
@@ -106,7 +127,14 @@
         "unsigned": "Unsigned/v1/v1_p2wpkh_locktime.psbt",
         "signed": "Signed/v1/v1_p2wpkh_locktime.psbt"
       },
-      "notes": "Non-zero locktime"
+      "notes": "Non-zero locktime",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2wpkh_with_change",
@@ -122,7 +150,14 @@
         "unsigned": "Unsigned/v1/v1_p2wpkh_2in_2out.psbt",
         "signed": "Signed/v1/v1_p2wpkh_2in_2out.psbt"
       },
-      "notes": "Alias of 2in_2out for with_change coverage (no dedicated file)"
+      "notes": "Alias of 2in_2out for with_change coverage (no dedicated file)",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2tr_1in_1out",
@@ -138,7 +173,14 @@
         "unsigned": "Unsigned/v1/v1_p2tr_1in_1out.psbt",
         "signed": "Signed/v1/v1_p2tr_1in_1out.psbt"
       },
-      "notes": "BIP86 key-path baseline; seed = call release..."
+      "notes": "BIP86 key-path baseline; seed = call release...",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2tr_2in_2out",
@@ -154,7 +196,14 @@
         "unsigned": "Unsigned/v1/v1_p2tr_2in_2out.psbt",
         "signed": "Signed/v1/v1_p2tr_2in_2out.psbt"
       },
-      "notes": "Multi-input Taproot key-path"
+      "notes": "Multi-input Taproot key-path",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2tr_rbf",
@@ -170,7 +219,14 @@
         "unsigned": "Unsigned/v1/v1_p2tr_rbf.psbt",
         "signed": "Signed/v1/v1_p2tr_rbf.psbt"
       },
-      "notes": "RBF + Taproot key-path"
+      "notes": "RBF + Taproot key-path",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "mixed_p2wpkh_p2tr_2in_2out",
@@ -186,7 +242,14 @@
         "unsigned": "Unsigned/v1/sparrow-mixed-p2wpkh-p2tr-2in2out.psbt",
         "signed": "Signed/v1/sparrow-mixed-p2wpkh-p2tr-2in2out-signed.psbt"
       },
-      "notes": "CRITICAL multi-input case from Sparrow mixed export name. Current fixture witness UTXOs are both P2WPKH (0014\u2026); still required High. Re-export true P2WPKH+P2TR when available."
+      "notes": "CRITICAL multi-input case from Sparrow mixed export name. Current fixture witness UTXOs are both P2WPKH (0014\u2026); still required High. Re-export true P2WPKH+P2TR when available.",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2wpkh_3in_1out",
@@ -202,7 +265,14 @@
         "unsigned": "Unsigned/v1/v1_p2wpkh_3in_1out.psbt",
         "signed": "Signed/v1/v1_p2wpkh_3in_1out.psbt"
       },
-      "notes": "Consolidation 3in->1out"
+      "notes": "Consolidation 3in->1out",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2wpkh_high_locktime",
@@ -218,7 +288,14 @@
         "unsigned": "Unsigned/v1/v1_p2wpkh_high_locktime.psbt",
         "signed": "Signed/v1/v1_p2wpkh_high_locktime.psbt"
       },
-      "notes": "Very high locktime"
+      "notes": "Very high locktime",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2tr_with_change",
@@ -234,7 +311,14 @@
         "unsigned": "Unsigned/v1/v1_p2tr_2in_2out.psbt",
         "signed": "Signed/v1/v1_p2tr_2in_2out.psbt"
       },
-      "notes": "Alias of p2tr_2in_2out for change coverage"
+      "notes": "Alias of p2tr_2in_2out for change coverage",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2sh_p2wpkh_1in_1out",
@@ -250,7 +334,14 @@
         "unsigned": "Unsigned/v1/sparrow-nested-p2sh-p2wpkh-unsigned.psbt",
         "signed": "Signed/v1/sparrow-nested-p2sh-p2wpkh-signed.psbt"
       },
-      "notes": "Nested SegWit; policy=sign if key matches (code can)"
+      "notes": "Nested SegWit; policy=sign if key matches (code can)",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2wsh_2of3_clean",
@@ -266,7 +357,14 @@
         "unsigned": "Unsigned/v1/v1_p2wsh_2of3_clean.psbt",
         "signed": null
       },
-      "notes": "Multisig partial-sig only; not full finalize in v0.1"
+      "notes": "Multisig partial-sig only; not full finalize in v0.1",
+      "fkt_signed_status": "pending",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": false,
+        "fkt_signed": false,
+        "verified": false
+      }
     },
     {
       "id": "p2tr_script_path",
@@ -282,7 +380,14 @@
         "unsigned": "Unsigned/v1/sparrow-taproot-scriptpath-unsigned.psbt",
         "signed": "Signed/v1/sparrow-taproot-scriptpath-signed.psbt"
       },
-      "notes": "Named scriptpath in Sparrow export but PSBT is key-path (TAP_INTERNAL_KEY 0x17, no 0x18/0x15). FKT keypath-signs; matches Sparrow keypath witness. Real script-path fixtures TODO for 0.2."
+      "notes": "Named scriptpath in Sparrow export but PSBT is key-path (TAP_INTERNAL_KEY 0x17, no 0x18/0x15). FKT keypath-signs; matches Sparrow keypath witness. Real script-path fixtures TODO for 0.2.",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
     },
     {
       "id": "p2wpkh_dust",
@@ -540,5 +645,25 @@
       },
       "notes": "Named scriptpath in Sparrow export but PSBT is key-path (TAP_INTERNAL_KEY 0x17, no 0x18/0x15). FKT keypath-signs; matches Sparrow keypath witness. Real script-path fixtures TODO for 0.2."
     }
-  ]
+  ],
+  "golden_set": {
+    "description": "Committed FKT-signed goldens for default harness (high+medium+low with known seeds)",
+    "ids": [
+      "mixed_p2wpkh_p2tr_2in_2out",
+      "p2sh_p2wpkh_1in_1out",
+      "p2tr_1in_1out",
+      "p2tr_2in_2out",
+      "p2tr_rbf",
+      "p2tr_script_path",
+      "p2tr_with_change",
+      "p2wpkh_1in_1out",
+      "p2wpkh_2in_2out",
+      "p2wpkh_3in_1out",
+      "p2wpkh_high_locktime",
+      "p2wpkh_locktime",
+      "p2wpkh_rbf",
+      "p2wpkh_with_change"
+    ],
+    "regen": "cd cli && make test-sparrow-real && git diff --exit-code tests/sparrow-real/fkt-signed/"
+  }
 }

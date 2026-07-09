@@ -19,7 +19,7 @@ OBJS = main.o \
 
 all: fktsigner verify_ecdsa
 
-.PHONY: test-sparrow test-sparrow-real test-sparrow-real-list sparrow-base64 clean
+.PHONY: test-sparrow test-sparrow-real test-sparrow-real-list test-sparrow-real-golden sparrow-base64 clean
 
 $(SECP_LIB):
 	cd $(SECP_DIR) && gcc -std=c99 -O2 -Iinclude -Isrc -DENABLE_MODULE_SCHNORRSIG -DENABLE_MODULE_EXTRAKEYS -c src/secp256k1.c -o libsecp256k1_main.o
@@ -44,6 +44,10 @@ test-sparrow-real-list:
 # Default: high+medium+low. Full matrix: make test-sparrow-real ARGS=--all
 test-sparrow-real: fktsigner verify_ecdsa
 	python3 tests/run_sparrow_real_harness.py $(ARGS)
+
+# Same as test-sparrow-real, then require byte-stable fkt-signed goldens.
+test-sparrow-real-golden: fktsigner verify_ecdsa
+	python3 tests/run_sparrow_real_harness.py --check-golden $(ARGS)
 
 sparrow-base64: fktsigner
 	@test -n "$(PSBT)" || (echo "Usage: make sparrow-base64 PSBT=path/to/signed.psbt"; exit 1)

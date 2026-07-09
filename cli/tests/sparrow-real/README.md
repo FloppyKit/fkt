@@ -16,7 +16,7 @@ cli/tests/sparrow-real/
 ├── manifest.json          ← source of truth for cases / expect / seeds
 ├── unsigned/              ← canonical unsigned PSBTs (id.psbt)
 ├── sparrow-signed/        ← Sparrow reference signed PSBTs (when present)
-├── fkt-signed/            ← FKT outputs (harness writes here; not golden yet)
+├── fkt-signed/            ← FKT-signed **goldens** (high+medium+low; harness regenerates)
 ├── Unsigned/v1/           ← legacy tree (kept for old harness / history)
 ├── Signed/v1/             ← legacy Sparrow-signed tree
 └── output/                ← legacy harness scratch (do not treat as golden)
@@ -87,9 +87,14 @@ export FKT_SEED_NESTED="reward parade plug shop ..."
 export FKT_SEED_LEGACY_P2WPKH_HEX="<128 hex chars>"
 ```
 
-Outputs land in `fkt-signed/`. Pass criteria: signer success + signature material;
-byte-equal to Sparrow when possible; else ECDSA verify (`verify_ecdsa`) for
-P2WPKH legs; Taproot keypath witness structure / Sparrow witness match.
+Outputs land in `fkt-signed/`. **Default-matrix goldens are committed** (14 files).
+Pass criteria: signer success + signature material; byte-equal to Sparrow when
+possible; else ECDSA verify (`verify_ecdsa`) for P2WPKH legs; Taproot keypath
+witness structure / Sparrow witness match.
+
+```bash
+make test-sparrow-real-golden   # sign + require byte-stable goldens
+```
 
 ---
 
@@ -139,8 +144,8 @@ See `cli/tests/TEST_SEEDS.md`. Summary:
 | Package | Status |
 |---------|--------|
 | 1 Layout + manifest + README | done (`test-matrix-step-1-layout-complete`) |
-| 2 Sign/reject harness against env seed | **this commit** |
-| 3 FKT-signed goldens + checklist | next |
+| 2 Sign/reject harness against env seed | done (`test-matrix-step-2-harness-complete`) |
+| 3 FKT-signed goldens + checklist | **this commit** |
 | Script-path signing (0.2) | later — true 0x18/0x15 fixtures; version bump when support lands |
 
 ---
