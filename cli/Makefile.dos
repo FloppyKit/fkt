@@ -56,15 +56,25 @@ OBJS       = $(addprefix $(OBJDIR)/,$(BASE_OBJS))
 
 all: $(TARGET)
 
+DOS_STRIP ?= $(DJGPP_ROOT)/bin/i586-pc-msdosdjgpp-strip
+
 $(TARGET): $(OBJS) $(SECP_LIB)
 	$(DOS_CC) -o $@ $(OBJS) $(SECP_LIB) -Wl,--gc-sections
+	@if [ -x "$(DOS_STRIP)" ]; then $(DOS_STRIP) $@; echo "stripped $(TARGET)"; fi
 	@echo "Built $(TARGET) ($$(stat -c%s $(TARGET) 2>/dev/null || wc -c < $(TARGET)) bytes)"
 
+# Prefer prebuilt DOS libsecp256k1.a under secp256k1-build-dos/
 secp:
-	$(MAKE) -C .. -f scripts/build_secp_dos.mk
+	@if [ -f $(SECP_LIB) ]; then \
+		echo "using existing $(SECP_LIB)"; \
+	elif [ -f ../scripts/build_secp_dos.mk ]; then \
+		$(MAKE) -C .. -f scripts/build_secp_dos.mk; \
+	else \
+		echo "missing $(SECP_LIB) — place DOS libsecp256k1.a under secp256k1-build-dos/"; exit 1; \
+	fi
 
 $(SECP_LIB):
-	$(MAKE) secp
+	@test -f $(SECP_LIB) || $(MAKE) -f Makefile.dos secp
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)

@@ -64,6 +64,18 @@ fktsigner-release:
 fktsigner-dos:
 	$(MAKE) -f Makefile.dos
 
+# Phase 1 Step 5: DOS floppy package + size audit + optional DOSBox smoke
+.PHONY: test-retro floppy-stage
+test-retro: fktsigner-dos
+	../scripts/check_floppy_size.sh FKTSIGN.EXE
+	../scripts/stage_floppy.sh
+	../scripts/dosbox_smoke.sh
+	@echo "PASS test-retro (DOS size + package + smoke)"
+
+floppy-stage:
+	../scripts/stage_floppy.sh
+	@echo "PASS floppy-stage"
+
 warm:
 	$(MAKE) WARM=1 fktsigner fkt
 

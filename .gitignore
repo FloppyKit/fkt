@@ -34,3 +34,7 @@ __pycache__/
 
 # Bonus / scratch fkt-signed (goldens for high+medium+low ARE tracked)
 # Re-run: make test-sparrow-real && git diff --exit-code cli/tests/sparrow-real/fkt-signed/
+
+# Floppy staging (track package; ignore smoke junk)
+dist/**/VER.OUT
+dist/**/ver.out

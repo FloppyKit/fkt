@@ -58,5 +58,6 @@ Verify
   cd cli && make test-bip-vectors # official BIP39 seed + SHA256 empty
   cd cli && make test-multi-input # 2in/3in/mixed PASS
   cd cli && make test-silent-payments-stub  # SP path deferred boundary
+  cd cli && make test-retro                 # Step 5: DOS EXE + floppy package
   # clean C89 compile (zero warnings on Ice Cold objects we own)
   # high sparrow-real: P2WPKH + P2TR keypath + mixed + 0xFC passthrough

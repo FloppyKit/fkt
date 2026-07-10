@@ -1,58 +1,32 @@
 FKT DOS BUILD — TEST STATUS
 ===========================
-Branch: cli/tui-pr5-cli
-Last updated: 2026-07-09  (v0.1.0 ship)
+Branch: main
+Last updated: 2026-07-09  (Phase 1 Step 5 retro)
+
+Packaging: DOS FKTSIGN.EXE = 1.44 MB floppy; Linux fktsigner = USB/GUI base.
 
 VERIFIED (automated / dev host)
 -------------------------------
-[PASS] make -f Makefile.dos          -> FKTSIGN.EXE
-[PASS] check_floppy_size.sh            -> within 1.20 MiB EXE budget
-[PASS] dosbox_smoke.sh FKTSIGN.EXE     -> prints "fkt 0.1.0" (Linux)
-[PASS] make (Linux dev)                -> fktsigner --version OK
+[PASS] make -f Makefile.dos          -> FKTSIGN.EXE (stripped ~296 KB)
+[PASS] scripts/check_floppy_size.sh  -> EXE + package within 1.44 MB (~21% used)
+[PASS] scripts/stage_floppy.sh       -> dist/floppy-iced-cold/
+[PASS] scripts/dosbox_smoke.sh       -> prints "fkt 0.2.2"
+[PASS] make test (Linux)             -> full suite green (Phase 1 Step 4)
 
-TUI PR1 (visual foundation) — NEEDS MANUAL QA
----------------------------------------------
-[ ] Banner title on row 1, rule on row 2 (title not scrolled off)
-[ ] Green-on-black body text (create-wallet / seed preview too)
-[ ] Cursor on main-menu prompt (not 1 row low)
-[ ] Seed entry: grid updates in place (no stacked "1.word" copies)
-[ ] Arrow keys ignored (no H/P/M/K garbage)
-[ ] [Q] seed QR: VGA mode 13h QR, any key returns to text UI (no page fault)
-[ ] Theme hotkey (#) is no-op on DOS (stays green)
+TUI / hardware QA — NEEDS HUMAN (Matt when available)
+----------------------------------------------------
+[ ] Banner title on row 1, rule on row 2
+[ ] Green-on-black body text
+[ ] Seed entry: grid updates in place
+[ ] [Q] seed QR: VGA mode 13h, return to text UI
+[ ] Sign: type CONFIRM after preview
+[ ] CLI: FKTSIGN.EXE sign --psbt in --out out --seed "..." --yes
 
-MANUAL QA (through PR5)
------------------------
-Camera: NO support on DOS or Linux offline builds (browse/paste only).
-A future host GUI could add camera later; not in FKTSIGN.EXE.
+Camera: NO support on DOS (browse/paste only).
 
-[ ] Header: "FKT SIGNER v0.1" + ICED COLD WALLET
-[ ] Mouse works on second browse after loading a PSBT
-[ ] Preview: each output amount line + address on next line
-[ ] Preview: no blinking cursor; Fee rate aligned
-[ ] Debug on preview: compact lines under fee (not pushing header off)
-[ ] Quantum: "[Space] locked - quantum saturation reached" (no weird glyph)
-[ ] Sign: type CONFIRM (any case) after preview
-[ ] CLI: fkt sign --psbt in --out out --seed "..." --yes
-
-CLI test (Linux):
-  ./fktsigner sign --psbt corpus/sparrow_v1_p2wpkh_1in_1out.psbt \
-      --out /tmp/out.psbt --seed "your twelve words ..." --yes
-
-KNOWN GOTCHAS
--------------
-- DOS 8.3: use FKTSIGN.EXE (FKTSIGNER.EXE = illegal command)
-- DJGPP stub requires CWSDPMI.EXE in same directory
-- Mount full path in DOSBox (no ~); dir before run to confirm files on C:
-- Mac Homebrew: brew install dosbox-x (command is dosbox-x)
-- M4 build: Rosetta + arch -x86_64 for i586-pc-msdosdjgpp-gcc
-- SSH to X280: DISPLAY=:0 needs xhost +local: or run DOSBox locally on laptop
-
-QUICK SMOKE (Linux)
--------------------
-  scripts/bootstrap_djgpp.sh
+Rebuild
+-------
+  export PATH="$PWD/tools/djgpp/bin:$PATH"
   cd cli && make -f Makefile.dos
-  ../scripts/dosbox_smoke.sh FKTSIGN.EXE
-
-QUICK RUN (Mac, after build + CWSDPMI in ~/fkt-dos-test/)
-----------------------------------------------------------
-  dosbox-x -c "mount c /Users/USER/fkt-dos-test" -c "c:" -c "dir" -c "FKTSIGN.EXE"
+  ../scripts/stage_floppy.sh
+  ../scripts/dosbox_smoke.sh

@@ -29,6 +29,7 @@ Warm seed-file work stays on an isolated branch later. Never merge into Ice Cold
 | Modular PSBT core map + zero-warning Ice Cold build gate | `cli/docs/MODULE_MAP.md` / `make test-psbt-core` |
 | CLI entry: preview→seed→sign, binary+Base64, 3-word verify, QR | `make test-cli-entry` |
 | Full suite: BIP vectors + Sparrow/Bark 0xFC + multi-in + SP stub | `make test` |
+| Retro DOS + floppy size audit (~21% of 1.44 MB) | `make test-retro` / `scripts/stage_floppy.sh` |
 | GitHub hygiene | Only `main`; old PR branches pruned |
 
 **Deferred (human):** DOSBox runtime smoke of `FKTSIGN.EXE` (Matt when available).  
