@@ -1,6 +1,12 @@
 FKT Signer - DOS / 486 Floppy Build
 ===================================
 
+Packaging split (Ice Cold)
+--------------------------
+  Floppy image  →  this DOS build (FKTSIGN.EXE + CWSDPMI). Size budget applies.
+  Bootable USB  →  Linux fktsigner inside a tiny secure live environment.
+                   Same signing crypto; different packaging host.
+
 Files on the 1.44 MB floppy
 ---------------------------
   FKTSIGN.EXE     Main signer (8.3 name; was FKTSIGNER — too long for DOS)

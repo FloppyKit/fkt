@@ -233,12 +233,6 @@ static int fkt_seed_hpad(int width) {
     return pad > 0 ? pad : 0;
 }
 
-static void fkt_seed_put_hpad(int width) {
-    int pad = fkt_seed_hpad(width);
-    while (pad-- > 0)
-        putchar(' ');
-}
-
 static int fkt_seed_grid_rows(int total) {
     return total > 0 ? total / 3 : 1;
 }
@@ -474,11 +468,6 @@ static void fkt_seed_wipe_input_typed(void) {
     /* Enter lands on the bottom-border row; restore it, then reclaim input row */
     fkt_seed_box_edge_bottom();
     fkt_screen_goto(g_input_row, 1);
-}
-
-static void fkt_seed_prompt_input(const char *prompt) {
-    fkt_seed_redraw_input_line(prompt);
-    fkt_seed_cursor_after_prompt(prompt);
 }
 
 static void fkt_seed_draw_screen(const char words[MAX_WORDS][WORD_BUF],

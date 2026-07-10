@@ -32,8 +32,10 @@ The core is a completely offline signer that works anywhere you can run C — fr
 **1. FKT CLI** — The core offline signer binary  
 Pure C89 air-gapped PSBT signer. Runs on ancient hardware or any minimal environment. Stateless, RAM-only, produces signed PSBT + dense ASCII QR.
 
+**Packaging:** **DOS (`FKTSIGN.EXE`) = 1.44 MB floppy image.** **Linux (`fktsigner`) = basis for the bootable USB / GUI** (tiny secure live Linux). Same signing crypto; different media.
+
 **2. FKT Bootable GUI** — The full bootable signer environment  
-Minimal Linux GUI (Tiny Core based) that boots from USB/floppy and includes the CLI signer underneath. Designed as a practical daily-driver air-gapped device.
+Minimal Linux GUI that boots from **USB** and includes the Linux CLI signer underneath. Designed as a practical daily-driver air-gapped device. (Classic **floppy** remains the DOS path.)
 
 **3. FKT PWA** — The modern offline transaction coordinator  
 Single-file offline HTML app. Drag & drop PSBTs, preview, edit, and either sign directly (WASM) or export to CLI for true air-gapped signing. Includes Paranoid Send Mode and educational debug view.

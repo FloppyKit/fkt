@@ -2,8 +2,17 @@
 
 **Date:** 2026-07-09  
 **Branch:** `main` @ post-parity tip  
-**Tags in force:** `v0.1.1` (keypath matrix freeze), `v0.2.0` (synthetic script-path)  
+**Tags in force:** `v0.1.1` (keypath matrix freeze), `v0.2.0` (synthetic script-path), `v0.2.2` (0xFC passthrough)  
 **Principle:** Signing perfect first. No PWA/relay feature work until the offline signer bar for the current package is green.
+
+### Packaging (canonical)
+
+| Medium | Build | Binary | Notes |
+|--------|-------|--------|-------|
+| **1.44 MB floppy** | DOS (`Makefile.dos`) | `FKTSIGN.EXE` + `CWSDPMI.EXE` | Primary retro deliverable; size audit applies |
+| **Bootable USB / GUI** | Linux (`Makefile`) | `fktsigner` in tiny secure live Linux | Same crypto path; host basis for GUI stack |
+
+Warm seed-file work stays on an isolated branch later. Never merge into Ice Cold main.
 
 ---
 
@@ -16,6 +25,8 @@
 | Full Linux CLI + TUI + DOS build tree on `main` | `make`, `make -f Makefile.dos` |
 | Linux CLI/TUI crypto parity | `make test-parity-linux` → PASS=15 |
 | Synthetic single-leaf script-path | `make test-scriptpath` |
+| Proprietary 0xFC passthrough (global/input/output) | `v0.2.2` / `make test-proprietary` |
+| Modular PSBT core map + zero-warning Ice Cold build gate | `cli/docs/MODULE_MAP.md` / `make test-psbt-core` |
 | GitHub hygiene | Only `main`; old PR branches pruned |
 
 **Deferred (human):** DOSBox runtime smoke of `FKTSIGN.EXE` (Matt when available).  

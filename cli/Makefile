@@ -204,3 +204,15 @@ test-proprietary: fktsigner
 	python3 tests/run_sparrow_real_harness.py --priority high 2>&1 | tee /tmp/fkt-prop-harness.txt
 	@grep -q 'p2wpkh_proprietary_passthrough.*PASS.*proprietary passthrough ok' /tmp/fkt-prop-harness.txt
 	@echo "PASS test-proprietary"
+
+# Phase 1 Step 2: modular PSBT core — P2WPKH + Taproot keypath + 0xFC + clean build
+.PHONY: test-psbt-core
+test-psbt-core: fktsigner verify_ecdsa
+	@echo "=== test-psbt-core: clean modular path (parse/sign/finalize) ==="
+	python3 tests/run_sparrow_real_harness.py --priority high 2>&1 | tee /tmp/fkt-psbt-core.txt
+	@grep -q 'p2wpkh_1in_1out.*PASS' /tmp/fkt-psbt-core.txt
+	@grep -q 'p2tr_1in_1out.*PASS' /tmp/fkt-psbt-core.txt
+	@grep -q 'mixed_p2wpkh_p2tr_2in_2out.*PASS' /tmp/fkt-psbt-core.txt
+	@grep -q 'p2wpkh_proprietary_passthrough.*PASS.*proprietary passthrough ok' /tmp/fkt-psbt-core.txt
+	@grep -qE 'Results: PASS=[0-9]+ FAIL=0' /tmp/fkt-psbt-core.txt
+	@echo "PASS test-psbt-core"
