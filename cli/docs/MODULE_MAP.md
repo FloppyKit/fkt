@@ -52,7 +52,11 @@ UI / I/O (not crypto truth)
 
 Verify
 ------
+  cd cli && make test             # Step 4: full umbrella (all gates)
   cd cli && make test-psbt-core   # Step 2: parse/sign/finalize matrix
   cd cli && make test-cli-entry   # Step 3: CLI entry gate
+  cd cli && make test-bip-vectors # official BIP39 seed + SHA256 empty
+  cd cli && make test-multi-input # 2in/3in/mixed PASS
+  cd cli && make test-silent-payments-stub  # SP path deferred boundary
   # clean C89 compile (zero warnings on Ice Cold objects we own)
   # high sparrow-real: P2WPKH + P2TR keypath + mixed + 0xFC passthrough

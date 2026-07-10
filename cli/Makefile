@@ -147,7 +147,7 @@ fuzz: fkt_fuzz fuzz-corpus
 	./fkt_fuzz -max_len=4096 -runs=50000 corpus/
 
 clean:
-	rm -f *.o fktsigner verify_ecdsa fkt_fuzz test_parse psbt_parse_test test_qr
+	rm -f *.o fktsigner verify_ecdsa fkt_fuzz test_parse psbt_parse_test test_qr test_bip_vectors
 # --- Matrix / v0.2 harness (from test-matrix branch) ---
 .PHONY: test-sparrow-real test-sparrow-real-list test-sparrow-real-golden test-scriptpath test-scriptpath-ark test-parity-linux
 
@@ -222,3 +222,46 @@ test-psbt-core: fktsigner verify_ecdsa
 test-cli-entry: fktsigner
 	python3 tests/run_cli_entry.py
 	@echo "PASS test-cli-entry"
+
+# Phase 1 Step 4: BIP vectors, multi-input, SP stub, full umbrella
+BIP_VEC_OBJS = fkt_bip39.o fkt_bip32.o fkt_pbkdf2.o fkt_sha256.o fkt_sha512.o \
+	fkt_hmac.o fkt_hash160.o fkt_ripemd160.o fkt_secp256k1.o fkt_memzero.o \
+	fkt_error.o fkt_util.o
+
+test_bip_vectors: tests/test_bip_vectors.c $(BIP_VEC_OBJS) $(SECP_LIB)
+	$(CC) $(CFLAGS) -o $@ tests/test_bip_vectors.c $(BIP_VEC_OBJS) $(SECP_LIB)
+
+.PHONY: test-bip-vectors
+test-bip-vectors: test_bip_vectors
+	./test_bip_vectors
+	@echo "PASS test-bip-vectors"
+
+.PHONY: test-multi-input
+test-multi-input: fktsigner verify_ecdsa gen-scriptpath-fixtures
+	python3 tests/run_multi_input_gate.py
+	@echo "PASS test-multi-input"
+
+.PHONY: test-silent-payments-stub
+test-silent-payments-stub:
+	python3 tests/run_silent_payments_stub.py
+	@echo "PASS test-silent-payments-stub"
+
+# Full Phase 1 Step 4 suite — all must PASS
+.PHONY: test
+test: fktsigner verify_ecdsa
+	@echo "========================================"
+	@echo " FKT Ice Cold full suite (Phase 1 Step 4)"
+	@echo "========================================"
+	$(MAKE) test-bip-vectors
+	$(MAKE) test-cli-entry
+	$(MAKE) test-psbt-core
+	$(MAKE) test-proprietary
+	$(MAKE) test-scriptpath
+	$(MAKE) test-scriptpath-ark
+	$(MAKE) test-sparrow-real
+	$(MAKE) test-multi-input
+	$(MAKE) test-parity-linux
+	$(MAKE) test-silent-payments-stub
+	@echo "========================================"
+	@echo " PASS make test (full suite)"
+	@echo "========================================"

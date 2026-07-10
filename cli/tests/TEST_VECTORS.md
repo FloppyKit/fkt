@@ -5,7 +5,10 @@ For each vector, prefer **unsigned** + **Sparrow-signed** + **FKT-signed** golde
 
 **Source of truth (Sparrow real):** `cli/tests/sparrow-real/manifest.json`  
 **Seeds (TESTNET ONLY):** `cli/tests/TEST_SEEDS.md`  
-**Harness:** `cd cli && make test-sparrow-real` / `make test-sparrow-real-golden`
+**Harness:** `cd cli && make test-sparrow-real` / `make test-sparrow-real-golden`  
+**Full suite (Phase 1 Step 4):** `cd cli && make test`  
+  BIP vectors · CLI entry · PSBT core · proprietary 0xFC · script-path ·  
+  sparrow-real · multi-input · parity · Silent Payments stub
 
 **Status cells** (four flags, left→right):
 
