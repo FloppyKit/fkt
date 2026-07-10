@@ -10,7 +10,7 @@ VERIFIED (automated / dev host)
 [PASS] make -f Makefile.dos          -> FKTSIGN.EXE (stripped ~296 KB)
 [PASS] scripts/check_floppy_size.sh  -> EXE + package within 1.44 MB (~21% used)
 [PASS] scripts/stage_floppy.sh       -> dist/floppy-iced-cold/
-[PASS] scripts/dosbox_smoke.sh       -> prints "fkt 0.2.2"
+[PASS] scripts/dosbox_smoke.sh       -> prints "fkt 0.2.1"
 [PASS] make test (Linux)             -> full suite green (Phase 1 Step 4)
 
 TUI / hardware QA — NEEDS HUMAN (Matt when available)

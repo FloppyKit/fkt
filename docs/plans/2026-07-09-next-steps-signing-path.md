@@ -30,6 +30,7 @@ Warm seed-file work stays on an isolated branch later. Never merge into Ice Cold
 | CLI entry: preview→seed→sign, binary+Base64, 3-word verify, QR | `make test-cli-entry` |
 | Full suite: BIP vectors + Sparrow/Bark 0xFC + multi-in + SP stub | `make test` |
 | Retro DOS + floppy size audit (~21% of 1.44 MB) | `make test-retro` / `scripts/stage_floppy.sh` |
+| Ice Cold v1 ship tag (product string `0.2.1`) | tag `iced-cold-v1` |
 | GitHub hygiene | Only `main`; old PR branches pruned |
 
 **Deferred (human):** DOSBox runtime smoke of `FKTSIGN.EXE` (Matt when available).  

@@ -1,5 +1,6 @@
 /* fkt_screen.c - screen control (ANSI on Linux, BIOS/VRAM on DOS) */
 #include "fkt_platform.h"
+#include "fkt_version.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -15,7 +16,12 @@
 #define FKT_DOS_ATTR_AMBER  0x06
 #define FKT_DOS_BANNER_ROWS 2
 
-static const char fkt_dos_banner_text[] = "FKT SIGNER v0.1";
+static char fkt_dos_banner_text[40];
+
+static void fkt_dos_banner_refresh(void) {
+    snprintf(fkt_dos_banner_text, sizeof(fkt_dos_banner_text),
+             "FKT SIGNER v%s", FKT_VERSION_STRING);
+}
 
 static int g_dos_inited = 0;
 static int g_dos_cols = 80;
@@ -93,6 +99,7 @@ static void fkt_dos_put_str_at(int x, int y, const char *s) {
 static void fkt_dos_paint_banner(void) {
     int i;
 
+    fkt_dos_banner_refresh();
     fkt_dos_fill(0, 0, g_dos_cols - 1, FKT_DOS_BANNER_ROWS - 1, ' ');
     fkt_dos_put_str_at(0, 0, fkt_dos_banner_text);
     /* Right: full cold-wallet tag when it fits */

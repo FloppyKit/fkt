@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-09  
 **Tag:** `phase1-step-5-retro`  
-**Version string:** `0.2.2` (Ice Cold)
+**Version string:** `0.2.1` (Ice Cold product string; see `iced-cold-v1`)
 
 ## Packaging (canonical)
 
@@ -32,7 +32,7 @@
 ## DOSBox smoke (automated)
 
 ```text
-FKTSIGN.EXE --version  →  fkt 0.2.2
+FKTSIGN.EXE --version  →  fkt 0.2.1
 ```
 
 (Host: DOSBox 0.74; mount staged package dir as `C:`.)

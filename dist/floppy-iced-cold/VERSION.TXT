@@ -1,5 +1,5 @@
 FKT Ice Cold floppy package
-version: 0.2.2
-built:   2026-07-10T03:58Z
+version: 0.2.1
+built:   2026-07-10T04:12Z
 host:    Linux 6.17.0-35-generic x86_64
 files:   FKTSIGN.EXE CWSDPMI.EXE README.TXT

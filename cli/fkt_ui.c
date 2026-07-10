@@ -53,7 +53,7 @@
 #endif
 
 
-#define UI_LEFT_LABEL  "FKT SIGNER v0.2"
+/* Built each paint: "FKT SIGNER v" + FKT_VERSION_STRING */
 #define UI_BODY_W      66
 
 #define SIGN_DEFAULT_OUT "tx-2026-07-06-fkt.psbt"
@@ -301,11 +301,15 @@ static void ui_draw_top_banner(void) {
     (void)0;
 #else
     char line[256];
+    char left_label[40];
     int lw = ui_line_w();
-    int left_len = (int)strlen(UI_LEFT_LABEL);
+    int left_len;
     int right_len = (int)strlen(FKT_WALLET_LABEL);
     int dbg_at = (lw - 3) / 2;
     int i;
+
+    snprintf(left_label, sizeof(left_label), "FKT SIGNER v%s", FKT_VERSION_STRING);
+    left_len = (int)strlen(left_label);
 
     if (lw > (int)sizeof(line) - 1)
         lw = (int)sizeof(line) - 1;
@@ -313,7 +317,9 @@ static void ui_draw_top_banner(void) {
     for (i = 0; i < lw; i++)
         line[i] = ' ';
     line[lw] = '\0';
-    memcpy(line, UI_LEFT_LABEL, (size_t)left_len);
+    if (left_len > lw)
+        left_len = lw;
+    memcpy(line, left_label, (size_t)left_len);
     if (right_len < lw)
         memcpy(line + lw - right_len, FKT_WALLET_LABEL, (size_t)right_len);
     if (g_ui_debug)
@@ -1323,6 +1329,7 @@ static void fkt_emit_cli_help(FILE *fp, int use_ui) {
     help_emit_line(fp, use_ui, "Ice Cold: preview before seed; 12/24 words + random 3-word verify (TUI);");
     help_emit_line(fp, use_ui, "signed binary + clean Base64 out; optional --qr. DOS=floppy Linux=USB.");
     help_emit_line(fp, use_ui, "Supports: BIP39, P2WPKH, P2TR keypath/scriptpath, 0xFC passthrough, QR");
+    help_emit_line(fp, use_ui, "(Banner / --version use FKT_VERSION_STRING from fkt_version.h)");
 }
 
 void fkt_cli_print_help(FILE *fp) {
