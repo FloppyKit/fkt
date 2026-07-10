@@ -27,6 +27,7 @@ Warm seed-file work stays on an isolated branch later. Never merge into Ice Cold
 | Synthetic single-leaf script-path | `make test-scriptpath` |
 | Proprietary 0xFC passthrough (global/input/output) | `v0.2.2` / `make test-proprietary` |
 | Modular PSBT core map + zero-warning Ice Cold build gate | `cli/docs/MODULE_MAP.md` / `make test-psbt-core` |
+| CLI entry: preview→seed→sign, binary+Base64, 3-word verify, QR | `make test-cli-entry` |
 | GitHub hygiene | Only `main`; old PR branches pruned |
 
 **Deferred (human):** DOSBox runtime smoke of `FKTSIGN.EXE` (Matt when available).  

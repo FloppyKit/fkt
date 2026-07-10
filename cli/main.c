@@ -1,4 +1,4 @@
-/* main.c – FKT signer CLI */
+/* main.c – FKT signer CLI (Ice Cold entry: preview → seed → sign → out/QR) */
 #if !(defined(FKT_DOS) && FKT_DOS)
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -30,11 +30,14 @@ static int arg_is_version(const char *s) {
 
 static void print_usage_brief(const char *prog) {
     fprintf(stderr, "Usage: %s [--help | --version | inspect <psbt> | qr ...]\n", prog);
-    fprintf(stderr, "       %s sign --psbt <in> --out <out> --seed \"words...\"\n", prog);
-    fprintf(stderr, "       %s sign --psbt <in> --out <out>   (seed on stdin)\n", prog);
+    fprintf(stderr, "       %s sign --psbt <in> --out <out> [--seed \"words...\"] [--yes] [--qr]\n",
+            prog);
+    fprintf(stderr, "       %s sign --base64 <cHNidP...> --out <out> [--seed ...] [--yes]\n",
+            prog);
+    fprintf(stderr, "       %s base64 <file.psbt>   (print clean Base64)\n", prog);
     fprintf(stderr, "       %s                    (interactive menu)\n", prog);
 #if FKT_BUILD_DEV_HARNESS
-    fprintf(stderr, "       Dev: sign <in> <out> \"mnemonic\" | --base64 <psbt> | <hex128> ...\n");
+    fprintf(stderr, "       Dev: sign <in> <out> \"mnemonic\" | <hex128> <path> <in> <out>\n");
 #endif
     fprintf(stderr, "       Run '%s --help' for the full command reference.\n", prog);
 }
@@ -91,6 +94,73 @@ static int psbt_to_base64(const uint8_t *data, size_t len) {
     return 0;
 }
 
+/* Print clean one-line Base64 of a signed (or any) PSBT file. Returns 0 ok. */
+static int fkt_cli_print_file_base64(const char *path) {
+    if (fkt_psbt_load_file(path) != 0) {
+        fprintf(stderr, "Cannot load PSBT for Base64: %s\n", path);
+        return -1;
+    }
+    if (psbt_to_base64(psbt_buffer, psbt_size) != 0)
+        return -1;
+    return 0;
+}
+
+/* Dense ASCII QR of a PSBT file (Base64 payload). interactive=0 for scripts. */
+static int fkt_cli_show_psbt_qr(const char *path, int interactive, int force_term) {
+    char b64[FKT_QR_MAX_PAYLOAD + 1];
+    uint8_t raw[4096];
+    FILE *f;
+    long sz;
+    size_t raw_len;
+
+    f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "Cannot open %s for QR\n", path);
+        return -1;
+    }
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return -1;
+    }
+    sz = ftell(f);
+    if (sz < 0 || (size_t)sz > sizeof(raw)) {
+        fclose(f);
+        fprintf(stderr, "PSBT too large for qr (max %lu bytes).\n",
+                (unsigned long)sizeof(raw));
+        return -1;
+    }
+    rewind(f);
+    raw_len = (size_t)sz;
+    if (fread(raw, 1, raw_len, f) != raw_len) {
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    if (psbt_to_base64_buf(raw, raw_len, b64, sizeof(b64)) != 0) {
+        fkt_memzero(raw, sizeof(raw));
+        fprintf(stderr, "Base64 conversion failed (payload may exceed QR max).\n");
+        return -1;
+    }
+    fkt_memzero(raw, sizeof(raw));
+
+    if (fkt_qr_encode_text(b64) != 0) {
+        fkt_memzero(b64, sizeof(b64));
+        fprintf(stderr, "QR encode failed (len=%lu).\n", (unsigned long)strlen(b64));
+        return -1;
+    }
+    fkt_memzero(b64, sizeof(b64));
+
+    fkt_ui_term_init();
+    if (fkt_qr_display(fkt_ui_term_cols(), fkt_ui_term_rows(), interactive, force_term) != 0) {
+        fkt_qr_clear();
+        fprintf(stderr, "QR display failed.\n");
+        return -1;
+    }
+    fkt_qr_clear();
+    return 0;
+}
+
 #if FKT_BUILD_DEV_HARNESS
 static int hex_decode(const char *hex, uint8_t *out, int max_out) {
     int len = strlen(hex);
@@ -105,6 +175,10 @@ static int hex_decode(const char *hex, uint8_t *out, int max_out) {
 }
 #endif
 
+/*
+ * Preview + fingerprint BEFORE any seed material is held.
+ * psbt_in may be a filesystem path or a pasted Base64 blob.
+ */
 static int fkt_cli_confirm_psbt(const char *input_psbt) {
     if (fkt_psbt_preview_prepare(input_psbt) != 0)
         return -1;
@@ -123,22 +197,39 @@ static int fkt_cli_sign_psbt_words(const char *input_psbt, const char *output_ps
 }
 
 /*
- * fkt sign --psbt in.psbt --out out.psbt --seed "w1 w2 ..."
- * fkt sign --psbt in.psbt --out out.psbt   (mnemonic on stdin, one line)
- * Optional: --yes  skip interactive CONFIRM (scripted / offline pipeline)
+ * fkt sign --psbt in.psbt --out out.psbt [--seed "w1 w2 ..."] [--yes] [--qr]
+ * fkt sign --base64 cHNidP... --out out.psbt [--seed ...] [--yes] [--qr]
+ *
+ * Order (Ice Cold): preview/confirm → seed → sign → binary out + clean Base64
+ * → optional ASCII QR → secure-zero seed words.
  */
 static int fkt_cli_run_sign(int argc, char **argv) {
     const char *psbt_in = NULL;
     const char *psbt_out = NULL;
     const char *seed_str = NULL;
     int yes = 0;
+    int want_qr = 0;
     int i;
     char words[MAX_WORDS][WORD_BUF];
     int num_words = 0;
     char seed_line[512];
+    int have_seed = 0;
+
+    memset(words, 0, sizeof(words));
 
     for (i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--psbt") == 0 && i + 1 < argc) {
+            if (psbt_in) {
+                fprintf(stderr, "Only one of --psbt / --base64 (input).\n");
+                return 1;
+            }
+            psbt_in = argv[++i];
+        } else if (strcmp(argv[i], "--base64") == 0 && i + 1 < argc) {
+            /* Input PSBT as Base64 string (or short path — load_input accepts both). */
+            if (psbt_in) {
+                fprintf(stderr, "Only one of --psbt / --base64 (input).\n");
+                return 1;
+            }
             psbt_in = argv[++i];
         } else if (strcmp(argv[i], "--out") == 0 && i + 1 < argc) {
             psbt_out = argv[++i];
@@ -147,6 +238,8 @@ static int fkt_cli_run_sign(int argc, char **argv) {
             seed_str = argv[++i];
         } else if (strcmp(argv[i], "--yes") == 0 || strcmp(argv[i], "-y") == 0) {
             yes = 1;
+        } else if (strcmp(argv[i], "--qr") == 0) {
+            want_qr = 1;
         } else if (argv[i][0] != '-') {
             /* Legacy: sign <in> <out> "mnemonic" */
             if (!psbt_in)
@@ -164,33 +257,22 @@ static int fkt_cli_run_sign(int argc, char **argv) {
     if (!psbt_in || !psbt_out) {
         fprintf(stderr,
                 "Usage: %s sign --psbt <in.psbt> --out <out.psbt> "
-                "[--seed \"words...\"] [--yes]\n",
+                "[--seed \"words...\"] [--yes] [--qr]\n",
                 argv[0]);
-        fprintf(stderr, "       Seed may also be piped on stdin (one line).\n");
-        return 1;
-    }
-
-    if (!seed_str) {
-        if (!fgets(seed_line, sizeof(seed_line), stdin)) {
-            fprintf(stderr, "No seed on stdin and no --seed given.\n");
-            return 1;
-        }
-        {
-            size_t n = strlen(seed_line);
-            while (n > 0 && (seed_line[n - 1] == '\n' || seed_line[n - 1] == '\r'))
-                seed_line[--n] = '\0';
-        }
-        seed_str = seed_line;
-    }
-
-    if (!fkt_seed_from_string(seed_str, words, &num_words)) {
-        fprintf(stderr, "Invalid mnemonic.\n");
+        fprintf(stderr,
+                "       %s sign --base64 <cHNidP...> --out <out.psbt> "
+                "[--seed ...] [--yes] [--qr]\n",
+                argv[0]);
+        fprintf(stderr,
+                "       Preview runs before seed. Interactive seed if no --seed "
+                "on a TTY; else one-line stdin.\n");
         return 1;
     }
 
     if (yes)
         fkt_confirm_set_enabled(0);
 
+    /* 1) Preview + confirm BEFORE any seed material. */
     if (fkt_cli_confirm_psbt(psbt_in) != 0) {
         const char *cerr = fkt_last_error_get();
         if (cerr && cerr[0] != '\0')
@@ -200,22 +282,89 @@ static int fkt_cli_run_sign(int argc, char **argv) {
         return 1;
     }
 
-    if (fkt_cli_sign_psbt_words(psbt_in, psbt_out, words, num_words) != 0) {
-        const char *cerr = fkt_last_error_get();
-        if (cerr && cerr[0] != '\0')
-            fprintf(stderr, "%s\n", cerr);
-        else
-            {
-                const char *err = fkt_last_error_get();
-                if (err && err[0])
-                    fprintf(stderr, "%s\n", err);
-                else
-                    fprintf(stderr, "Signing failed.\n");
-            }
+    /* 2) Seed: --seed / interactive TTY / stdin line. */
+    if (seed_str) {
+        if (!fkt_seed_from_string(seed_str, words, &num_words)) {
+            fprintf(stderr, "Invalid mnemonic (need 12 or 24 BIP39 words).\n");
+            return 1;
+        }
+        have_seed = 1;
+    } else if (fkt_tty_is_interactive()) {
+        fkt_ui_term_init();
+        if (!fkt_interactive_seed(words, &num_words)) {
+            const char *cerr = fkt_last_error_get();
+            if (cerr && cerr[0] != '\0')
+                fprintf(stderr, "%s\n", cerr);
+            else
+                fprintf(stderr, "Interactive seed entry failed.\n");
+            fkt_secure_zero(words, sizeof(words));
+            return 1;
+        }
+        have_seed = 1;
+    } else {
+        if (!fgets(seed_line, sizeof(seed_line), stdin)) {
+            fprintf(stderr, "No seed on stdin and no --seed given.\n");
+            return 1;
+        }
+        {
+            size_t n = strlen(seed_line);
+            while (n > 0 && (seed_line[n - 1] == '\n' || seed_line[n - 1] == '\r'))
+                seed_line[--n] = '\0';
+        }
+        if (!fkt_seed_from_string(seed_line, words, &num_words)) {
+            fkt_memzero(seed_line, sizeof(seed_line));
+            fprintf(stderr, "Invalid mnemonic (need 12 or 24 BIP39 words).\n");
+            return 1;
+        }
+        fkt_memzero(seed_line, sizeof(seed_line));
+        have_seed = 1;
+    }
+
+    if (!have_seed || num_words < 12) {
+        fkt_secure_zero(words, sizeof(words));
+        fprintf(stderr, "Seed not loaded.\n");
         return 1;
     }
 
+    /* 3) Sign. */
+    if (fkt_cli_sign_psbt_words(psbt_in, psbt_out, words, num_words) != 0) {
+        const char *cerr = fkt_last_error_get();
+        fkt_secure_zero(words, sizeof(words));
+        if (cerr && cerr[0] != '\0')
+            fprintf(stderr, "%s\n", cerr);
+        else
+            fprintf(stderr, "Signing failed.\n");
+        return 1;
+    }
+
+    /* 4) Wipe seed words held in this CLI frame (signer already wiped derived keys). */
+    fkt_secure_zero(words, sizeof(words));
+
     printf("Signed PSBT written: %s\n", psbt_out);
+    printf("Signed PSBT Base64:\n");
+    if (fkt_cli_print_file_base64(psbt_out) != 0)
+        return 1;
+
+    /* 5) Optional scannable ASCII / terminal QR. */
+    if (want_qr) {
+        if (fkt_cli_show_psbt_qr(psbt_out, fkt_tty_is_interactive() ? 1 : 0, 1) != 0)
+            return 1;
+    }
+
+    return 0;
+}
+
+/* Always-on: print clean Base64 of a PSBT file (binary or b64 on disk). */
+static int fkt_cli_run_base64(int argc, char **argv) {
+    const char *path;
+
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s base64 <file.psbt>\n", argv[0]);
+        return 1;
+    }
+    path = argv[2];
+    if (fkt_cli_print_file_base64(path) != 0)
+        return 1;
     return 0;
 }
 
@@ -236,7 +385,8 @@ static int fkt_cli_run_qr(int argc, char **argv) {
     int i;
 
     fkt_ui_term_init();
-    interactive = 1;
+    /* No key wait when stdout is not a TTY (scripts / harness). */
+    interactive = fkt_tty_is_interactive() ? 1 : 0;
     force_term = 0;
     do_pbm = 0;
     pbm_out = NULL;
@@ -373,6 +523,17 @@ int main(int argc, char **argv) {
     if (argc >= 3 && strcmp(argv[1], "qr") == 0)
         return fkt_cli_run_qr(argc, argv);
 
+    /* Always-on Base64 dump (binary file → clean one-line Base64). */
+    if (argc >= 2 && strcmp(argv[1], "base64") == 0)
+        return fkt_cli_run_base64(argc, argv);
+
+    /* Dev alias still works: --base64 <file> */
+    if (argc == 3 && strcmp(argv[1], "--base64") == 0) {
+        if (fkt_cli_print_file_base64(argv[2]) != 0)
+            return 1;
+        return 0;
+    }
+
     /* PR5: pure CLI sign (always on, DOS + Linux). */
     if (argc >= 2 && strcmp(argv[1], "sign") == 0)
         return fkt_cli_run_sign(argc, argv);
@@ -394,6 +555,8 @@ int main(int argc, char **argv) {
         }
         for (i = 0; i < 33; i++) printf("%02x", child_pub33[i]);
         printf("\n");
+        fkt_memzero(seed, sizeof(seed));
+        fkt_memzero(child_priv, sizeof(child_priv));
         return 0;
     }
     if (argc == 7 && strcmp(argv[1], "--parent-pubkey") == 0) {
@@ -413,6 +576,7 @@ int main(int argc, char **argv) {
         }
         if (hex_decode(argv[4], pub33, sizeof(pub33)) != 33) {
             fprintf(stderr, "Invalid pubkey hex.\n");
+            fkt_memzero(seed, sizeof(seed));
             return 1;
         }
         if (fkt_sign_psbt_with_parent(seed, argv[3], argv[5], argv[6], pub33) != 0) {
@@ -423,18 +587,11 @@ int main(int argc, char **argv) {
                 else
                     fprintf(stderr, "Signing failed.\n");
             }
+            fkt_memzero(seed, sizeof(seed));
             return 1;
         }
+        fkt_memzero(seed, sizeof(seed));
         fkt_cli_sign_success_interact(argv[6]);
-        return 0;
-    }
-
-    if (argc == 3 && strcmp(argv[1], "--base64") == 0) {
-        if (fkt_psbt_load_file(argv[2]) != 0) {
-            fprintf(stderr, "Cannot load PSBT: %s\n", argv[2]);
-            return 1;
-        }
-        psbt_to_base64(psbt_buffer, psbt_size);
         return 0;
     }
 
@@ -461,11 +618,15 @@ int main(int argc, char **argv) {
                 else
                     fprintf(stderr, "Signing failed.\n");
             }
+            fkt_memzero(seed, sizeof(seed));
             return 1;
         }
+        fkt_memzero(seed, sizeof(seed));
         fkt_cli_sign_success_interact(argv[4]);
         return 0;
     }
+#else
+    (void)i;
 #endif
 
     print_usage_brief(argv[0]);

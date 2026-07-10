@@ -1284,43 +1284,45 @@ static void help_emit_arg(FILE *fp, int use_ui, const char *name, const char *de
 static void fkt_emit_cli_help(FILE *fp, int use_ui) {
     help_emit_line(fp, use_ui, "Example (all forms):");
     help_emit_line(fp, use_ui, "  fkt  |  fkt preview <psbt>  |  fkt inspect <psbt>");
-    help_emit_line(fp, use_ui, "  fkt sign --psbt in.psbt --out out.psbt --seed \"w1 w2 ...\"");
+    help_emit_line(fp, use_ui, "  fkt sign --psbt in.psbt --out out.psbt --seed \"w1 w2 ...\" --yes");
+    help_emit_line(fp, use_ui, "  fkt sign --base64 cHNidP... --out out.psbt --seed \"...\" --yes");
     help_emit_line(fp, use_ui, "  echo \"w1 w2 ...\" | fkt sign --psbt in.psbt --out out.psbt --yes");
-    help_emit_line(fp, use_ui, "  fkt qr <text>  |  fkt qr --psbt <file> [--term] [--pbm f]");
+    help_emit_line(fp, use_ui, "  fkt base64 signed.psbt  |  fkt qr --psbt signed.psbt [--term]");
 #if FKT_BUILD_DEV_HARNESS
-    help_emit_line(fp, use_ui, "  Dev: fkt --base64 <psbt>  |  fkt <hex128> <path> <in> <out>");
+    help_emit_line(fp, use_ui, "  Dev: fkt <hex128> <path> <in> <out>");
 #endif
     help_emit_line(fp, use_ui, "  fkt --help  |  fkt --version");
     help_emit_line(fp, use_ui, "");
     help_emit_line(fp, use_ui, "Arguments:");
     help_emit_arg(fp, use_ui, "fkt", "Open interactive wallet");
-    help_emit_arg(fp, use_ui, "sign", "CLI sign: --psbt --out [--seed] [--yes]");
+    help_emit_arg(fp, use_ui, "sign", "Preview→seed→sign (--psbt|--base64 --out)");
+    help_emit_arg(fp, use_ui, "--psbt", "Binary .psbt path (or b64 file)");
+    help_emit_arg(fp, use_ui, "--base64", "Input PSBT as Base64 string");
+    help_emit_arg(fp, use_ui, "--out", "Output signed binary PSBT");
+    help_emit_arg(fp, use_ui, "--seed", "12/24 BIP39 words (else TTY or stdin)");
+    help_emit_arg(fp, use_ui, "--yes", "Skip interactive CONFIRM (scripted)");
+    help_emit_arg(fp, use_ui, "--qr", "Show ASCII QR of signed PSBT");
+    help_emit_arg(fp, use_ui, "base64", "Print clean Base64 of a PSBT file");
     help_emit_arg(fp, use_ui, "preview", "Read-only tx summary ([Q] QR)");
     help_emit_arg(fp, use_ui, "inspect", "Same as preview");
     help_emit_arg(fp, use_ui, "qr", "Show QR code");
     help_emit_arg(fp, use_ui, "<text>", "Any QR payload");
-    help_emit_arg(fp, use_ui, "--psbt", "QR signed PSBT");
     help_emit_arg(fp, use_ui, "--term", "Force terminal QR");
     help_emit_arg(fp, use_ui, "--pbm", "Export PBM image");
 #if FKT_BUILD_DEV_HARNESS
-    help_emit_arg(fp, use_ui, "sign", "Sign from mnemonic ([Q] QR after)");
-    help_emit_arg(fp, use_ui, "<in>", "Input PSBT file");
-    help_emit_arg(fp, use_ui, "<out>", "Output signed PSBT");
-    help_emit_arg(fp, use_ui, "\"mnemonic\"", "Quoted seed words");
-    help_emit_arg(fp, use_ui, "--base64", "Print PSBT base64");
-    help_emit_arg(fp, use_ui, "<hex128>", "64-byte seed hex");
+    help_emit_arg(fp, use_ui, "<hex128>", "64-byte seed hex (dev harness)");
     help_emit_arg(fp, use_ui, "<path>", "BIP32 derivation path");
     help_emit_arg(fp, use_ui, "--pubkey", "Print derived pubkey");
     help_emit_arg(fp, use_ui, "--parent-pubkey", "Advanced cosign path");
-    help_emit_arg(fp, use_ui, "<pub33>", "Parent pubkey hex");
 #endif
     help_emit_arg(fp, use_ui, "<psbt>", "File or pasted base64");
     help_emit_arg(fp, use_ui, "--help, -h", "Print this help");
     help_emit_arg(fp, use_ui, "--version", "Print version string");
     help_emit_arg(fp, use_ui, "[Q]", "Show QR on preview/sign screens");
     help_emit_line(fp, use_ui, "");
-    help_emit_line(fp, use_ui, "v0.1 supports: BIP39, P2WPKH, P2TR keypath, preview, sign, QR");
-    help_emit_line(fp, use_ui, "Not in v0.1: camera, Taproot script-path, Ark/Bark, multisig cosign UX");
+    help_emit_line(fp, use_ui, "Ice Cold: preview before seed; 12/24 words + random 3-word verify (TUI);");
+    help_emit_line(fp, use_ui, "signed binary + clean Base64 out; optional --qr. DOS=floppy Linux=USB.");
+    help_emit_line(fp, use_ui, "Supports: BIP39, P2WPKH, P2TR keypath/scriptpath, 0xFC passthrough, QR");
 }
 
 void fkt_cli_print_help(FILE *fp) {

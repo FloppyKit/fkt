@@ -42,16 +42,17 @@ Crypto building blocks (static libsecp256k1 + local)
 
 UI / I/O (not crypto truth)
 ---------------------------
-  main.c          CLI entry (sign / inspect / qr / TUI)
-  fkt_seed.c      Interactive BIP39 entry + verify
+  main.c          CLI entry (sign / inspect / base64 / qr / TUI)
+                  Ice Cold order: preview → seed → sign → binary+Base64 → optional QR
+  fkt_seed.c      Interactive BIP39 entry; random 3-word verify + CONFIRM
   fkt_preview.c   Read-only tx summary (no seed)
   fkt_confirm.c   Preview-before-seed / fingerprint
   fkt_qr*.c       Dense ASCII / PBM / VGA QR
   fkt_platform.h  DOS vs Linux port layer
 
-Verify (Phase 1 Step 2 gate)
-----------------------------
-  cd cli && make test-psbt-core
+Verify
+------
+  cd cli && make test-psbt-core   # Step 2: parse/sign/finalize matrix
+  cd cli && make test-cli-entry   # Step 3: CLI entry gate
   # clean C89 compile (zero warnings on Ice Cold objects we own)
   # high sparrow-real: P2WPKH + P2TR keypath + mixed + 0xFC passthrough
-  # script-path synthetic + ark-shaped leaves (csv/cltv) optional extras

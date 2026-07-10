@@ -216,3 +216,9 @@ test-psbt-core: fktsigner verify_ecdsa
 	@grep -q 'p2wpkh_proprietary_passthrough.*PASS.*proprietary passthrough ok' /tmp/fkt-psbt-core.txt
 	@grep -qE 'Results: PASS=[0-9]+ FAIL=0' /tmp/fkt-psbt-core.txt
 	@echo "PASS test-psbt-core"
+
+# Phase 1 Step 3: CLI entry (binary/Base64, preview→seed→sign, Base64 out, QR)
+.PHONY: test-cli-entry
+test-cli-entry: fktsigner
+	python3 tests/run_cli_entry.py
+	@echo "PASS test-cli-entry"

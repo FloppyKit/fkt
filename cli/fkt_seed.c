@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <stdint.h>
+#include <time.h>
 
 /* Color strings are ANSI-only; on DOS fkt_ui_green_str()/VRAM recolor handle it. */
 #if FKT_PLATFORM_DOS
@@ -684,31 +685,67 @@ int fkt_interactive_seed(char words[MAX_WORDS][WORD_BUF], int *num_words) {
     return 1;
 }
 
+/* One-shot srand so random word checks are not always index 0 after cold boot. */
+static void fkt_seed_srand_once(void) {
+    static int done = 0;
+    if (!done) {
+        srand((unsigned)time(NULL));
+        done = 1;
+    }
+}
+
+/*
+ * Random 3-word verification (Ice Cold interactive path).
+ * Picks three distinct indices, re-types each in order, then CONFIRM.
+ */
 int fkt_verify_seed(char words[MAX_WORDS][WORD_BUF], int num_words) {
     char reentry[WORD_BUF];
     char confirm[32];
-    char prompt[64];
-    int idx;
+    char prompt[72];
+    int indices[MAX_WORDS];
+    int picks[3];
+    int n_picks;
+    int i, j, t;
+    int round;
 
     if (!fkt_bip39_validate_checksum(words, num_words)) {
         fkt_secure_zero(words, sizeof(words[0]) * MAX_WORDS);
         return 0;
     }
 
-    idx = rand() % num_words;
-
-    snprintf(prompt, sizeof(prompt),
-             "Confirm Backup - re-type word #%d: ", idx + 1);
-    fkt_seed_draw_screen(words, num_words, num_words, prompt, "", 1);
-    if (!fkt_seed_read_line(reentry, sizeof(reentry), 1)) {
+    if (num_words < 3) {
         fkt_secure_zero(words, sizeof(words[0]) * MAX_WORDS);
         return 0;
     }
-    fkt_seed_wipe_input_typed();
-    fkt_seed_redraw_input_line(prompt);
 
-    {
+    fkt_seed_srand_once();
+    for (i = 0; i < num_words; i++)
+        indices[i] = i;
+    /* Partial Fisher–Yates: first 3 slots are the challenge words. */
+    n_picks = 3;
+    for (i = 0; i < n_picks; i++) {
+        j = i + (rand() % (num_words - i));
+        t = indices[i];
+        indices[i] = indices[j];
+        indices[j] = t;
+        picks[i] = indices[i];
+    }
+
+    for (round = 0; round < n_picks; round++) {
+        int idx = picks[round];
         char resolved[WORD_BUF];
+
+        snprintf(prompt, sizeof(prompt),
+                 "Confirm Backup (%d/3) - re-type word #%d: ",
+                 round + 1, idx + 1);
+        fkt_seed_draw_screen(words, num_words, num_words, prompt, "", 1);
+        if (!fkt_seed_read_line(reentry, sizeof(reentry), 1)) {
+            fkt_secure_zero(words, sizeof(words[0]) * MAX_WORDS);
+            return 0;
+        }
+        fkt_seed_wipe_input_typed();
+        fkt_seed_redraw_input_line(prompt);
+
         if (!fkt_seed_resolve_entry(reentry, resolved)) {
             fkt_seed_draw_screen(words, num_words, num_words, prompt,
                                  SEED_MSG_INVALID_WORD, 0);
@@ -717,19 +754,21 @@ int fkt_verify_seed(char words[MAX_WORDS][WORD_BUF], int num_words) {
         }
         strncpy(reentry, resolved, WORD_BUF - 1);
         reentry[WORD_BUF - 1] = '\0';
-    }
 
-    if (strcmp(reentry, words[idx]) != 0) {
-        fkt_seed_draw_screen(words, num_words, num_words, prompt,
-                             SEED_MSG_MISMATCH, 0);
-        fkt_last_error_set(SEED_MSG_MISMATCH);
-        fkt_secure_zero(words, sizeof(words[0]) * MAX_WORDS);
-        return 0;
+        if (strcmp(reentry, words[idx]) != 0) {
+            fkt_seed_draw_screen(words, num_words, num_words, prompt,
+                                 SEED_MSG_MISMATCH, 0);
+            fkt_last_error_set(SEED_MSG_MISMATCH);
+            fkt_secure_zero(words, sizeof(words[0]) * MAX_WORDS);
+            fkt_secure_zero(reentry, sizeof(reentry));
+            return 0;
+        }
+        fkt_secure_zero(reentry, sizeof(reentry));
     }
 
     fkt_seed_draw_screen(words, num_words, num_words,
                          "Type CONFIRM to accept seed:",
-                         "Confirm Backup... verified.", 1);
+                         "Confirm Backup... 3 words ok.", 1);
     if (!fkt_seed_read_line(confirm, sizeof(confirm), 1)) {
         fkt_secure_zero(words, sizeof(words[0]) * MAX_WORDS);
         return 0;
@@ -744,8 +783,10 @@ int fkt_verify_seed(char words[MAX_WORDS][WORD_BUF], int num_words) {
                              SEED_MSG_NOT_CONFIRMED, 0);
         fkt_last_error_set(SEED_MSG_NOT_CONFIRMED);
         fkt_secure_zero(words, sizeof(words[0]) * MAX_WORDS);
+        fkt_secure_zero(confirm, sizeof(confirm));
         return 0;
     }
+    fkt_secure_zero(confirm, sizeof(confirm));
 
     fkt_seed_draw_screen(words, num_words, num_words, "",
                          SEED_MSG_VERIFIED, 0);

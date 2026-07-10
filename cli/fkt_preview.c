@@ -354,6 +354,13 @@ int fkt_psbt_preview(const char *psbt_path) {
         return -1;
     }
 
+    /* Scripts / pipes: one-shot render, no key loop. */
+    if (!fkt_tty_is_interactive()) {
+        fkt_psbt_preview_render();
+        fkt_ui_term_restore();
+        return 0;
+    }
+
     for (;;) {
         preview_draw_interactive_screen();
         ch = fkt_tty_read_key_once();
