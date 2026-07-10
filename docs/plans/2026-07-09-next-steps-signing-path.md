@@ -1,9 +1,11 @@
 # Plan: Next steps on the signing path (post v0.2.0)
 
 **Date:** 2026-07-09  
-**Branch:** `main` @ post-parity tip  
-**Tags in force:** `v0.1.1` (keypath matrix freeze), `v0.2.0` (synthetic script-path), `v0.2.2` (0xFC passthrough)  
-**Principle:** Signing perfect first. No PWA/relay feature work until the offline signer bar for the current package is green.
+**Branch:** `main`  
+**Canonical full roadmap:** [`docs/ROADMAP.md`](../ROADMAP.md)  
+**Handoff tag:** `handoff-phase3-complete` (Phases 1–3 done; Phase 4 next)  
+**Tags in force:** `iced-cold-v1` (product 0.2.1), `warm-v1` (branch only), `phase3-pwa-v1`, plus intermediate `phase1-step-*`  
+**Principle:** Signing perfect first. Ice Cold bar is green; coordinator/relay is next (Phase 4).
 
 ### Packaging (canonical)
 
@@ -31,12 +33,14 @@ Warm seed-file work stays on an isolated branch later. Never merge into Ice Cold
 | Full suite: BIP vectors + Sparrow/Bark 0xFC + multi-in + SP stub | `make test` |
 | Retro DOS + floppy size audit (~21% of 1.44 MB) | `make test-retro` / `scripts/stage_floppy.sh` |
 | Ice Cold v1 ship tag (product string `0.2.1`) | tag `iced-cold-v1` |
-| GitHub hygiene | Only `main`; old PR branches pruned |
+| Warm encrypted seed (isolated branch) | branch `warm-wallet` / tag `warm-v1` — never merge to main |
+| Offline PWA (TUI-shaped shell, scan-first load) | `pwa/index.html` / `phase3-pwa-v1` + handoff tip |
+| GitHub hygiene | `main` + `warm-wallet` only for product tracks |
 
-**Deferred (human):** DOSBox runtime smoke of `FKTSIGN.EXE` (Matt when available).  
+**Next:** Phase 4 mock Nostr relay — see `docs/ROADMAP.md`.  
+
+**Deferred (human):** DOS hardware TUI smoke (`cli/docs/DOS_TEST_STATUS.txt`).  
 **Blocked externally:** Second signet faucet bech32m — **do not block crypto packages.**
-
-**Warm (later, not Ice Cold):** durable settings UI (e.g. default mainnet vs testnet for receive). Ice Cold prompts network each time on receive-address flow.
 
 ---
 
