@@ -259,6 +259,34 @@ static void render_preview(void) {
             printf("(amount unknown)  ");
         }
         printf("%s", input_script_label(psbt_data.input_script_type[i]));
+        if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2WSH &&
+            psbt_data.input_has_redeem_witness_script[i]) {
+            const uint8_t *ws = psbt_data.input_redeem_witness_script[i];
+            size_t wsl = psbt_data.input_redeem_witness_script_len[i];
+            if (wsl >= 2 && ws[0] >= 0x51 && ws[0] <= 0x60) {
+                int m = (int)(ws[0] - 0x50);
+                int n = 0;
+                size_t wp = 1;
+                while (wp < wsl) {
+                    uint8_t op = ws[wp];
+                    if (op == 0xAE) break;
+                    if (op >= 0x51 && op <= 0x60) {
+                        n = (int)(op - 0x50);
+                        break;
+                    }
+                    if (op == 0x21 && wp + 34 <= wsl)
+                        wp += 34;
+                    else
+                        break;
+                }
+                if (n > 0)
+                    printf("  %d-of-%d cosign", m, n);
+                else
+                    printf("  multisig cosign");
+            } else {
+                printf("  multisig cosign");
+            }
+        }
         if (fkt_psbt_format_derivation_path(i, path_buf, sizeof(path_buf)) == 0)
             printf("  path %s", path_buf);
         if (psbt_data.input_sequence[i] < 0xFFFFFFFEu)

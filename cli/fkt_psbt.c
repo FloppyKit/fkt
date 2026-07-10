@@ -7,6 +7,8 @@
 #include "fkt_platform.h"
 #include "fkt_error.h"
 #include "fkt_sha256.h"
+#include "fkt_bip32.h"
+#include "fkt_memzero.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -622,6 +624,7 @@ static int input_key_is_allowed(uint8_t key_type) {
     switch (key_type) {
     case FKT_PSBT_IN_NON_WITNESS_UTXO:
     case FKT_PSBT_IN_WITNESS_UTXO:
+    case FKT_PSBT_IN_PARTIAL_SIG:
     case FKT_PSBT_IN_SIGHASH_TYPE:
     case FKT_PSBT_IN_REDEEM_SCRIPT:
     case FKT_PSBT_IN_WITNESS_SCRIPT_05:
@@ -664,6 +667,10 @@ static void validate_input_key_field(uint8_t key_type, size_t key_data_len) {
     case FKT_PSBT_IN_TAP_LEAF_SCRIPT:
         if (key_data_len < 33 || key_data_len > FKT_TAP_CONTROL_BLOCK_MAX)
             fkt_psbt_die("Invalid key field length for TAP_LEAF_SCRIPT.");
+        break;
+    case FKT_PSBT_IN_PARTIAL_SIG:
+        if (key_data_len != 33)
+            fkt_psbt_die("Invalid key field length for PARTIAL_SIG.");
         break;
     case FKT_PSBT_IN_BIP32_DERIVATION:
         if (key_data_len != 33)
@@ -1118,6 +1125,13 @@ static void parse_inputs(int expected_inputs) {
                     psbt_data.input_witness_script_len[i] = script_len;
                     psbt_data.input_has_witness_script[i] = 1;
                 } break;
+            case FKT_PSBT_IN_PARTIAL_SIG:
+                /* Cosign: keep in buffer; finalizer collects via map walk. */
+                if (kdl != 33)
+                    fkt_psbt_die("PARTIAL_SIG key must be 33-byte pubkey.");
+                if (vl < 9 || vl > 73)
+                    fkt_psbt_die("PARTIAL_SIG value length invalid.");
+                break;
             case FKT_PSBT_IN_SIGHASH_TYPE:
                 if(vl!=4) fkt_psbt_die("SIGHASH_TYPE must be 4 bytes.");
                 psbt_data.input_sighash[i]=fkt_read_le32(v); psbt_data.input_has_sighash[i]=1; break;
@@ -1400,4 +1414,108 @@ int fkt_psbt_format_derivation_path(int input_index, char *buf, size_t buf_len) 
         total += written;
     }
     return 0;
+}
+
+/* Walk input map; for each BIP32 derivation try seed@path vs key pubkey. */
+int fkt_psbt_derive_matching_key(const uint8_t seed[64],
+                                 int input_index,
+                                 const char *path_override,
+                                 const uint8_t *parent_pub_override,
+                                 uint8_t child_priv[32],
+                                 uint8_t child_pub33[33]) {
+    size_t start, end, pos;
+
+    if (input_index < 0 || input_index >= input_separator_count)
+        return -1;
+    if (!seed || !child_priv || !child_pub33)
+        return -1;
+
+    start = input_map_start_offsets[input_index];
+    end = input_separator_offsets[input_index];
+    pos = start;
+
+    while (pos < end) {
+        uint64_t key_len, val_len;
+        const uint8_t *p;
+        const uint8_t *key_data;
+        const uint8_t *value;
+        const uint8_t *path_start;
+        size_t path_bytes;
+        int depth, j;
+        uint32_t path_idx[10];
+        uint8_t try_priv[32], try_pub[33];
+
+        p = psbt_buffer + pos;
+        if (!read_varint_from(&p, psbt_buffer + end, &key_len))
+            break;
+        pos = (size_t)(p - psbt_buffer);
+        if (key_len == 0 || pos + key_len > end)
+            break;
+
+        if (key_len == 34 && psbt_buffer[pos] == FKT_PSBT_IN_BIP32_DERIVATION) {
+            key_data = psbt_buffer + pos + 1;
+            pos += (size_t)key_len;
+            p = psbt_buffer + pos;
+            if (!read_varint_from(&p, psbt_buffer + end, &val_len))
+                break;
+            pos = (size_t)(p - psbt_buffer);
+            if (pos + val_len > end)
+                break;
+            value = psbt_buffer + pos;
+
+            if (val_len >= 4) {
+                if (val_len >= 5 && value[4] <= 10 &&
+                    val_len == 5 + ((size_t)value[4] * 4)) {
+                    path_start = value + 5;
+                    path_bytes = (size_t)value[4] * 4;
+                } else if (((val_len - 4) % 4) == 0) {
+                    path_start = value + 4;
+                    path_bytes = val_len - 4;
+                } else {
+                    path_start = NULL;
+                    path_bytes = 0;
+                }
+                depth = (int)(path_bytes / 4);
+                if (path_start != NULL && depth >= 1 && depth <= 10) {
+                    for (j = 0; j < depth; j++)
+                        path_idx[j] = fkt_read_le32(path_start + (size_t)j * 4);
+                    if (fkt_derive_from_indices(seed, path_idx, depth,
+                                                try_priv, try_pub,
+                                                parent_pub_override) == 0 &&
+                        memcmp(try_pub, key_data, 33) == 0) {
+                        memcpy(child_priv, try_priv, 32);
+                        memcpy(child_pub33, try_pub, 33);
+                        fkt_memzero(try_priv, sizeof(try_priv));
+                        return 0;
+                    }
+                    fkt_memzero(try_priv, sizeof(try_priv));
+                }
+            }
+            pos += (size_t)val_len;
+            continue;
+        }
+
+        pos += (size_t)key_len;
+        p = psbt_buffer + pos;
+        if (!read_varint_from(&p, psbt_buffer + end, &val_len))
+            break;
+        pos = (size_t)(p - psbt_buffer) + (size_t)val_len;
+    }
+
+    /* Fallback: single cached path or explicit CLI path. */
+    if (psbt_data.input_has_deriv_path[input_index]) {
+        if (fkt_derive_from_indices(seed,
+                                    psbt_data.input_deriv_path[input_index],
+                                    psbt_data.input_deriv_depth[input_index],
+                                    child_priv, child_pub33,
+                                    parent_pub_override) == 0)
+            return 0;
+    }
+    if (path_override != NULL && path_override[0] != '\0') {
+        if (fkt_derive_from_path(seed, path_override,
+                                 child_priv, child_pub33,
+                                 parent_pub_override) == 0)
+            return 0;
+    }
+    return -1;
 }

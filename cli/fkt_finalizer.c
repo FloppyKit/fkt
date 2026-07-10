@@ -281,19 +281,9 @@ static int fkt_derive_input_keys(const uint8_t seed[64],
                                  const uint8_t *parent_pub_override,
                                  uint8_t child_priv[32],
                                  uint8_t child_pub33[33]) {
-    if (fkt_psbt_input_has_derivation(input_index)) {
-        return fkt_derive_from_indices(seed,
-                                       fkt_psbt_input_derivation_path(input_index),
-                                       fkt_psbt_input_derivation_depth(input_index),
-                                       child_priv, child_pub33,
-                                       parent_pub_override);
-    }
-    if (path_override != NULL && path_override[0] != '\0') {
-        return fkt_derive_from_path(seed, path_override,
-                                    child_priv, child_pub33,
-                                    parent_pub_override);
-    }
-    return -1;
+    return fkt_psbt_derive_matching_key(seed, input_index, path_override,
+                                        parent_pub_override,
+                                        child_priv, child_pub33);
 }
 
 static int fkt_key_matches_input(int input_index, const uint8_t child_pub33[33]) {
@@ -396,10 +386,12 @@ static const fkt_partial_sig_entry *fkt_find_sig_for_pubkey(
 static int fkt_finalize_p2wsh_multisig(int input_index,
                                          const uint8_t *ws, size_t ws_len,
                                          const fkt_partial_sig_entry *sigs, int nsigs) {
-    uint8_t witness[520];
+    /* BIP141 witness: [dummy OP_0][sig…][witnessScript] — m sigs in script order. */
+    uint8_t witness[780];
     uint8_t *wp = witness;
     int threshold = 0;
     int sigs_found = 0;
+    int used = 0;
     size_t pos = 1;
     size_t wlen;
 
@@ -423,11 +415,14 @@ static int fkt_finalize_p2wsh_multisig(int input_index,
     if (fkt_insert_input_key(input_index, FKT_PSBT_IN_FINAL_SCRIPTSIG, NULL, 0, NULL, 0) != 0)
         return -1;
 
-    *wp++ = (uint8_t)(threshold + 1);
-    wp += fkt_write_compact_size(wp, 0);
+    /* stack items: dummy + m signatures + redeem/witness script */
+    if ((size_t)threshold + 2 > 252)
+        return -1;
+    *wp++ = (uint8_t)(threshold + 2);
+    wp += fkt_write_compact_size(wp, 0); /* CHECKMULTISIG dummy */
 
     pos = 1;
-    while (pos < ws_len) {
+    while (pos < ws_len && used < threshold) {
         uint8_t op = ws[pos];
         const fkt_partial_sig_entry *entry;
         if (op == 0xAE) break;
@@ -435,18 +430,37 @@ static int fkt_finalize_p2wsh_multisig(int input_index,
         if (op != 0x21) return -1;
         entry = fkt_find_sig_for_pubkey(sigs, nsigs, ws + pos + 1);
         if (entry != NULL) {
+            if (wp + 9 + entry->der_len + 9 + ws_len > witness + sizeof(witness))
+                return -1;
             wp += fkt_write_compact_size(wp, (uint64_t)entry->der_len);
             memcpy(wp, entry->der, entry->der_len);
             wp += entry->der_len;
+            used++;
         }
         pos += 34;
     }
+
+    if (used < threshold)
+        return 0;
+
+    if (wp + 9 + ws_len > witness + sizeof(witness))
+        return -1;
+    wp += fkt_write_compact_size(wp, (uint64_t)ws_len);
+    memcpy(wp, ws, ws_len);
+    wp += ws_len;
 
     wlen = (size_t)(wp - witness);
     if (fkt_insert_input_key(input_index, FKT_PSBT_IN_FINAL_SCRIPTWITNESS, NULL, 0, witness, wlen) != 0)
         return -1;
 
     while (fkt_remove_input_key_type(input_index, FKT_PSBT_IN_PARTIAL_SIG))
+        ;
+    /* Drop non-final fields once fully spent. */
+    while (fkt_remove_input_key_type(input_index, FKT_PSBT_IN_WITNESS_SCRIPT_05))
+        ;
+    while (fkt_remove_input_key_type(input_index, FKT_PSBT_IN_BIP32_DERIVATION))
+        ;
+    while (fkt_remove_input_key_type(input_index, FKT_PSBT_IN_SIGHASH_TYPE))
         ;
     return 1;
 }
@@ -490,12 +504,8 @@ int fkt_psbt_finalize(const uint8_t seed[64], const char *path_override,
         }
         fkt_memzero(child_priv, sizeof(child_priv));
 
-        if (!key_ok) {
-            fkt_print_input_status(i, "[WRONG KEY]");
-            fkt_memzero(child_pub33, sizeof(child_pub33));
-            continue;
-        }
-
+        /* P2WSH: finalize when threshold of partials is met even if this seed
+         * is only combining (still prefer matching key for status). */
         if (psbt_data.input_script_type[i] == SCRIPT_TYPE_P2WSH) {
             fkt_partial_sig_entry sigs[MAX_PARTIAL_SIGS];
             int nsigs;
@@ -504,7 +514,8 @@ int fkt_psbt_finalize(const uint8_t seed[64], const char *path_override,
             int result;
 
             if (!psbt_data.input_has_redeem_witness_script[i]) {
-                fkt_print_input_status(i, "[WRONG KEY]");
+                fkt_print_input_status(i, key_ok ? "[SIGNED]" : "[WRONG KEY]");
+                fkt_memzero(child_pub33, sizeof(child_pub33));
                 continue;
             }
             ws = psbt_data.input_redeem_witness_script[i];
@@ -514,13 +525,27 @@ int fkt_psbt_finalize(const uint8_t seed[64], const char *path_override,
             result = fkt_finalize_p2wsh_multisig(i, ws, ws_len, sigs, nsigs);
             if (result == 1) {
                 fkt_print_input_status(i, "[FINALIZED]");
+                fkt_memzero(child_pub33, sizeof(child_pub33));
                 continue;
             }
             if (fkt_signer_signed_inputs[i]) {
-                fkt_print_input_status(i, "[SIGNED]");
+                fkt_print_input_status(i, "[PARTIAL]");
+                fkt_memzero(child_pub33, sizeof(child_pub33));
+                continue;
+            }
+            if (key_ok) {
+                fkt_print_input_status(i, "[PARTIAL]");
+                fkt_memzero(child_pub33, sizeof(child_pub33));
                 continue;
             }
             fkt_print_input_status(i, "[WRONG KEY]");
+            fkt_memzero(child_pub33, sizeof(child_pub33));
+            continue;
+        }
+
+        if (!key_ok) {
+            fkt_print_input_status(i, "[WRONG KEY]");
+            fkt_memzero(child_pub33, sizeof(child_pub33));
             continue;
         }
 

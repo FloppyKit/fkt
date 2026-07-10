@@ -72,22 +72,26 @@ All **9 High** cases: **U+S+F+V** complete as of step 3.
 
 ---
 
-## V2 – Practical Multisig (~22 vectors)
+## V2 – Practical Multisig (native P2WSH cosign)
 
-| ID    | Filename                              | Script Type   | U | S | F | V | Notes |
+**Code bar (v0.3.0):** cosign + finalize when threshold met.  
+**Auto:** `make test-multisig` (synthetic 1of1 / 2of2 / 2of3).  
+**Manual Sparrow:** `docs/plans/2026-07-10-v2-multisig-sparrow-manual.md`
+
+| ID    | Filename / case                       | Script Type   | U | S | F | V | Notes |
 |-------|---------------------------------------|---------------|---|---|---|---|-------|
-| V2-01 | v2_p2wsh_2of2_1in_1out                | P2WSH         | [ ] | [ ] | [ ] | [ ] | |
-| V2-02 | v2_p2wsh_2of2_2in_2out                | P2WSH         | [ ] | [ ] | [ ] | [ ] | |
-| V2-03 | v2_p2wsh_2of3_1in_1out                | P2WSH         | [ ] | [ ] | [ ] | [ ] | have `p2wsh_2of3_clean` unsigned only |
-| V2-04 | v2_p2wsh_2of3_2in_2out                | P2WSH         | [ ] | [ ] | [ ] | [ ] | |
-| V2-05 | v2_p2sh_p2wsh_2of2_1in_1out           | P2SH-P2WSH    | [ ] | [ ] | [ ] | [ ] | |
-| V2-06 | v2_p2sh_p2wsh_2of3_1in_1out           | P2SH-P2WSH    | [ ] | [ ] | [ ] | [ ] | |
-| V2-07 | v2_mixed_p2wpkh_p2wsh_2in_2out        | Mixed         | [ ] | [ ] | [ ] | [ ] | |
-| V2-08 | v2_p2wsh_2of2_rbf                     | P2WSH         | [ ] | [ ] | [ ] | [ ] | |
-| V2-09 | v2_p2wsh_2of3_locktime                | P2WSH         | [ ] | [ ] | [ ] | [ ] | |
-| V2-10 | v2_p2wsh_2of2_dust                    | P2WSH         | [ ] | [ ] | [ ] | [ ] | |
+| V2-S1 | synthetic 1-of-1                      | P2WSH         | [x] | — | gen | [x] | `make test-multisig` finalize |
+| V2-S2 | synthetic 2-of-2 A→B                  | P2WSH         | [x] | — | gen | [x] | partial then finalize |
+| V2-S3 | synthetic 2-of-3 A→B                  | P2WSH         | [x] | — | gen | [x] | C unused |
+| V2-S4 | synthetic wrong seed                  | P2WSH         | [x] | — | — | [x] | reject |
+| V2-01 | p2wsh_1of1_sparrow                    | P2WSH         | [ ] | [ ] | [ ] | [ ] | **you** — Sparrow S1 |
+| V2-02 | p2wsh_2of2_unsigned                   | P2WSH         | [ ] | [ ] | [ ] | [ ] | **you** — Sparrow S2 |
+| V2-03 | p2wsh_2of2_partial_A                  | P2WSH         | [ ] | [ ] | [ ] | [ ] | **you** — Sparrow S3 optional |
+| V2-04 | p2wsh_2of3_unsigned                   | P2WSH         | [ ] | [ ] | [ ] | [ ] | **you** — Sparrow S4 |
+| V2-05 | p2wsh_2of3_clean (legacy)             | P2WSH         | [x] | [ ] | [ ] | [ ] | seed unknown; keep |
+| V2-06 | p2sh_p2wsh_2of2                       | P2SH-P2WSH    | [ ] | [ ] | [ ] | [ ] | stretch; not V2 ship bar |
 
-Policy: **partial_sig only** for P2WSH in v0.1 (not full finalize).
+Policy (v0.3.0): **native P2WSH m-of-n cosign + finalize**. Nested multi = later.
 
 ---
 

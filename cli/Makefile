@@ -210,6 +210,16 @@ test-scriptpath-ark: fktsigner gen-scriptpath-fixtures
 test-parity-linux: fktsigner
 	python3 tests/run_parity_linux.py
 
+# V2 native P2WSH multisig cosign + finalize
+GEN_MS = tests/gen_multisig_vector
+$(GEN_MS): tests/gen_multisig_vector.c $(SECP_LIB) fkt_bip32.o fkt_secp256k1.o fkt_sha256.o fkt_sha512.o fkt_hmac.o fkt_hash160.o fkt_ripemd160.o fkt_util.o fkt_error.o fkt_memzero.o
+	$(CC) $(CFLAGS) -o $@ tests/gen_multisig_vector.c fkt_bip32.o fkt_secp256k1.o fkt_sha256.o fkt_sha512.o fkt_hmac.o fkt_hash160.o fkt_ripemd160.o fkt_util.o fkt_error.o fkt_memzero.o $(SECP_LIB)
+
+.PHONY: test-multisig
+test-multisig: fktsigner $(GEN_MS)
+	FKT_NO_CONFIRM=1 python3 tests/run_multisig_tests.py
+	@echo "PASS test-multisig"
+
 # P2.1 proprietary 0xFC passthrough (Session B)
 .PHONY: test-proprietary
 test-proprietary: fktsigner
@@ -270,6 +280,7 @@ test: fktsigner verify_ecdsa
 	$(MAKE) test-proprietary
 	$(MAKE) test-scriptpath
 	$(MAKE) test-scriptpath-ark
+	$(MAKE) test-multisig
 	$(MAKE) test-sparrow-real
 	$(MAKE) test-multi-input
 	$(MAKE) test-parity-linux

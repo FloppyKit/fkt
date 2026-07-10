@@ -44,6 +44,32 @@ call release rib regret puzzle magic economy tragic various embody give road
 
 ---
 
+## Multisig cosigners (V2 P2WSH)
+
+**Cosigner A** — same as New P2WPKH / Taproot:
+
+```
+call release rib regret puzzle magic economy tragic various embody give road
+```
+
+**Cosigner B** — same as Nested:
+
+```
+reward parade plug shop winner melt leg unfold sand side shell receive vague miracle day wall pear season upper monkey wear duck paper brush
+```
+
+**Cosigner C** — BIP39 test mnemonic (third key for 2-of-3 only):
+
+```
+abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about
+```
+
+- **Path (synthetic + recommended Sparrow native multi):** `m/48'/1'/0'/2'/0/0`
+- **Harness:** `make test-multisig`
+- **Manual Sparrow checklist:** `docs/plans/2026-07-10-v2-multisig-sparrow-manual.md`
+
+---
+
 ## Legacy P2WPKH hex (older `v1_p2wpkh_*` exports)
 
 Older real Sparrow P2WPKH vectors were signed against a **BIP32 seed hex**, not one of the mnemonics above.

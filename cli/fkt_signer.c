@@ -390,19 +390,11 @@ static int fkt_derive_input_keys(const uint8_t seed[64],
                                  const uint8_t *parent_pub_override,
                                  uint8_t child_priv[32],
                                  uint8_t child_pub33[33]) {
-    if (fkt_psbt_input_has_derivation(input_index)) {
-        return fkt_derive_from_indices(seed,
-                                       fkt_psbt_input_derivation_path(input_index),
-                                       fkt_psbt_input_derivation_depth(input_index),
-                                       child_priv, child_pub33,
-                                       parent_pub_override);
-    }
-
-    if (path_override != NULL && path_override[0] != '\0') {
-        return fkt_derive_from_path(seed, path_override,
-                                    child_priv, child_pub33,
-                                    parent_pub_override);
-    }
+    /* Cosign-aware: match seed against any BIP32 derivation on the input. */
+    if (fkt_psbt_derive_matching_key(seed, input_index, path_override,
+                                     parent_pub_override,
+                                     child_priv, child_pub33) == 0)
+        return 0;
 
     printf("No derivation path for input %d.\n", input_index);
     return -1;

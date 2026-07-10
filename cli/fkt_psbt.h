@@ -180,4 +180,14 @@ const uint32_t *fkt_psbt_input_derivation_path(int input_index);
 const uint8_t *fkt_psbt_input_derivation_parent_pub(int input_index);
 int  fkt_psbt_format_derivation_path(int input_index, char *buf, size_t buf_len);
 
+/* Cosign: try every PSBT_IN_BIP32_DERIVATION on the input; use the entry whose
+ * compressed pubkey matches what this seed derives at that path. Essential for
+ * m-of-n where several keys/paths appear on one input. */
+int  fkt_psbt_derive_matching_key(const uint8_t seed[64],
+                                  int input_index,
+                                  const char *path_override,
+                                  const uint8_t *parent_pub_override,
+                                  uint8_t child_priv[32],
+                                  uint8_t child_pub33[33]);
+
 #endif
