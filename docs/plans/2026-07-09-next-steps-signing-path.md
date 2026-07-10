@@ -71,7 +71,7 @@ Goal: prove script-path is not only “one synthetic CHECKSIG” but **timelock-
 
 | # | Package | Type | Done when |
 |---|---------|------|-----------|
-| P2.1 | **Proprietary key passthrough** — do not strip unknown/bark `0xFC` keys on sign | code | Round-trip PSBT with dummy proprietary keys preserves them |
+| P2.1 | **Proprietary key passthrough** — do not strip unknown/bark `0xFC` keys on sign | code | **Done** — v0.2.2; harness `p2wpkh_proprietary_passthrough` |
 | P2.2 | Nested P2SH-P2WPKH: decide finalize vs partial_sig-only for product TUI message | product | Documented + test |
 | P2.3 | P2WSH: partial_sig only, clear “not fully supported” | product | Reject/partial fixtures documented |
 | P2.4 | ANYONECANPAY / non-default sighash: explicit support or clean reject | code+test | Manifest `expect` matches behavior |
@@ -117,9 +117,9 @@ Redirect: *“Signing perfect first — we can park that.”*
 ## 3. Suggested execution order (next 2–4 agent sessions)
 
 ```text
-Session A (now):     P1.1 + P1.2 + P1.3   bark-shaped synthetic leaves
-Session B:           P2.1                 proprietary passthrough
-Session C:           P0.2 CI (optional) + P1.4 tag
+Session A:           P1.1 + P1.2 + P1.3   bark-shaped synthetic leaves  (done, v0.2.1)
+Session B:           P2.1                 proprietary passthrough      (done, v0.2.2)
+Session C:           P0.2 CI (optional) + polish / P2.2–P2.4 product gaps
 Session D (human):   P0.1 DOS smoke + P3.1 faucet workaround
 Session E:           P3.2–P3.3 live claim when funded
 ```
@@ -133,7 +133,7 @@ Checklist:
 - [x] Keypath matrix green (Linux)  
 - [x] Script-path single-leaf synthetic green  
 - [x] Script-path CSV/CLTV-shaped leaves green  
-- [ ] Proprietary keys survive sign  
+- [x] Proprietary keys survive sign  
 - [ ] At least one bark-shaped or live exit-claim vector signed  
 - [ ] Matt DOS smoke (nice-to-have, not gate)  
 - [ ] Faucet optional — synthetic can satisfy “crypto ready” without live Ark  
@@ -157,6 +157,5 @@ cd cli && make && make test-parity-linux && make test-scriptpath
 
 ## 6. Immediate recommendation
 
-**Start Session A: P1.1–P1.3** — bark-shaped synthetic script-path leaves.  
-Highest leverage, no faucet, directly enables offline Ark claim story.  
-DOS remains your offline smoke when you have a machine; does not block A.
+**Session B done (P2.1).** Next agent leverage: P2.2–P2.4 product gaps, optional CI (P0.2),  
+or wait on live Ark (P3) when funded. DOS smoke remains human-only (P0.1).

@@ -632,10 +632,19 @@ static int input_key_is_allowed(uint8_t key_type) {
     case FKT_PSBT_IN_TAP_BIP32_DERIVATION:
     case FKT_PSBT_IN_TAP_INTERNAL_KEY:
     case FKT_PSBT_IN_TAP_MERKLE_ROOT:
+    case FKT_PSBT_IN_PROPRIETARY:
         return 1;
     default:
         return 0;
     }
+}
+
+/* BIP174 0xFC: leave in buffer; never interpret. Caps resist oversized maps. */
+static void fkt_psbt_accept_proprietary(size_t key_data_len, size_t value_len) {
+    if (key_data_len > FKT_PSBT_PROPRIETARY_KEY_DATA_MAX)
+        fkt_psbt_die("Proprietary key field too long.");
+    if (value_len > FKT_PSBT_PROPRIETARY_VALUE_MAX)
+        fkt_psbt_die("Proprietary value too long.");
 }
 
 static void validate_input_key_field(uint8_t key_type, size_t key_data_len) {
@@ -918,6 +927,11 @@ static void parse_global_map(int *num_inputs, int *num_outputs) {
                               &xpub_nkeys);
             continue;
         }
+        if (key_type == FKT_PSBT_GLOBAL_PROPRIETARY) {
+            /* Pass-through (e.g. bark metadata). Not interpreted. */
+            fkt_psbt_accept_proprietary(key_data_len, value_len);
+            continue;
+        }
         if (key_type != FKT_PSBT_GLOBAL_UNSIGNED_TX)
             fkt_psbt_die("Unknown PSBT key.");
         if (key_data_len != 0)
@@ -1032,6 +1046,11 @@ static void parse_inputs(int expected_inputs) {
             }
             if (!input_key_is_allowed(kt))
                 fkt_psbt_die("Unknown PSBT key.");
+            if (kt == FKT_PSBT_IN_PROPRIETARY) {
+                /* Pass-through: remain in psbt_buffer for sign round-trip. */
+                fkt_psbt_accept_proprietary(kdl, vl);
+                continue;
+            }
             validate_input_key_field(kt, kdl);
             map_key_track(map_keys, &map_nkeys, FKT_PSBT_MAX_INPUT_KEYS_PER_MAP,
                           kt, kd, kdl);
@@ -1155,6 +1174,9 @@ static void parse_inputs(int expected_inputs) {
             case FKT_PSBT_IN_FINAL_SCRIPTSIG:
             case FKT_PSBT_IN_FINAL_SCRIPTWITNESS:
                 break;
+            case FKT_PSBT_IN_PROPRIETARY:
+                /* Handled above (continue); unreachable. */
+                break;
             default:
                 fkt_psbt_die("Unknown PSBT key.");
                 break;
@@ -1233,6 +1255,11 @@ static void parse_outputs(int expected_outputs) {
                     output_separator_offsets[output_separator_count++] =
                         (size_t)(psbt_cursor - 1 - psbt_buffer);
                 break;
+            }
+            if (kt == FKT_PSBT_OUT_PROPRIETARY) {
+                /* Pass-through; do not strip on sign. Skip map_key_track (long keys). */
+                fkt_psbt_accept_proprietary(kdl, vl);
+                continue;
             }
             /* Output maps: unknown keys are ignored (BIP174), but duplicates abort. */
             map_key_track(map_keys, &map_nkeys, FKT_PSBT_MAX_OUTPUT_KEYS_PER_MAP,

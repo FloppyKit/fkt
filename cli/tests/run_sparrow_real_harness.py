@@ -193,6 +193,46 @@ def has_signature_material(raw):
     return False
 
 
+def collect_proprietary_entries(raw):
+    """Return list of (map_kind, map_index, key, value) for all 0xFC keys.
+
+    map_kind: 'global' | 'input' | 'output'
+    """
+    gmap, maps = parse_psbt_maps(raw)
+    if maps is None:
+        return []
+    utx = gmap.get(b"\x00") if gmap else None
+    n_in = count_tx_inputs(utx) if utx else 0
+    out = []
+    if gmap:
+        for k, v in gmap.items():
+            if len(k) >= 1 and k[0] == 0xFC:
+                out.append(("global", 0, k, v))
+    for i, m in enumerate(maps):
+        kind = "input" if i < n_in else "output"
+        idx = i if i < n_in else (i - n_in)
+        for k, v in m.items():
+            if len(k) >= 1 and k[0] == 0xFC:
+                out.append((kind, idx, k, v))
+    return out
+
+
+def proprietary_keys_survived(unsigned_raw, signed_raw):
+    """Every proprietary (0xFC) key/value from unsigned must appear in signed."""
+    u = collect_proprietary_entries(unsigned_raw)
+    if not u:
+        return False, "unsigned has no proprietary keys"
+    s = collect_proprietary_entries(signed_raw)
+    s_set = set((kind, idx, k, v) for kind, idx, k, v in s)
+    missing = []
+    for kind, idx, k, v in u:
+        if (kind, idx, k, v) not in s_set:
+            missing.append("%s[%d] key=%s" % (kind, idx, k.hex()[:24]))
+    if missing:
+        return False, "proprietary stripped: %s" % ", ".join(missing)
+    return True, "proprietary passthrough ok (%d keys)" % len(u)
+
+
 def all_inputs_have_sig_material(raw):
     maps = input_maps_only(raw)
     if not maps:
@@ -480,6 +520,13 @@ def run_case(case, seeds_meta, dry_run=False, check_golden=False):
     ok, detail = evaluate_sign(case, unsigned_raw, fkt_out, sparrow_path)
     if not ok:
         return "FAIL", cid, detail
+
+    if case.get("check_proprietary"):
+        signed_raw = open(fkt_out, "rb").read()
+        pok, pdetail = proprietary_keys_survived(unsigned_raw, signed_raw)
+        if not pok:
+            return "FAIL", cid, pdetail
+        detail = detail + "; " + pdetail
 
     if check_golden:
         if golden_bytes is None:

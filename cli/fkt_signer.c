@@ -220,7 +220,7 @@ static void fkt_cleanup_signed_psbt_maps(void) {
         fkt_remove_output_key_type(i, FKT_PSBT_OUT_BIP32_DERIVATION);
         fkt_remove_output_key_type(i, FKT_PSBT_OUT_TAP_TREE);
         fkt_remove_output_key_type(i, FKT_PSBT_OUT_TAP_BIP32_DERIVATION);
-        fkt_remove_output_key_type(i, FKT_PSBT_OUT_PROPRIETARY);
+        /* Proprietary 0xFC: pass through (bark ClaimInput / wallet metadata). */
     }
 }
 

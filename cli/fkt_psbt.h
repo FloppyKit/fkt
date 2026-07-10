@@ -26,6 +26,7 @@
 /* global map key types */
 #define FKT_PSBT_GLOBAL_UNSIGNED_TX   0x00
 #define FKT_PSBT_GLOBAL_XPUB          0x01
+#define FKT_PSBT_GLOBAL_PROPRIETARY   0xFC
 
 /* input map key types */
 #define FKT_PSBT_IN_NON_WITNESS_UTXO      0x00
@@ -46,6 +47,10 @@
 /* Control block: leaf_version|parity (1) + internal key (32) + up to 8 merkle nodes */
 #define FKT_TAP_CONTROL_BLOCK_MAX         (1 + 32 + 32 * 8)
 #define FKT_TAP_LEAF_SCRIPT_MAX           520
+
+/* Proprietary (0xFC) passthrough caps — not interpreted; length only. */
+#define FKT_PSBT_PROPRIETARY_KEY_DATA_MAX 256
+#define FKT_PSBT_PROPRIETARY_VALUE_MAX    4096
 
 /* output map key types */
 #define FKT_PSBT_OUT_WITNESS_SCRIPT       0x00

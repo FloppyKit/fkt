@@ -197,3 +197,10 @@ test-scriptpath-ark: fktsigner gen-scriptpath-fixtures
 # Linux pure-CLI (sign --seed --yes) is the same crypto path as TUI (from_words).
 test-parity-linux: fktsigner
 	python3 tests/run_parity_linux.py
+
+# P2.1 proprietary 0xFC passthrough (Session B)
+.PHONY: test-proprietary
+test-proprietary: fktsigner
+	python3 tests/run_sparrow_real_harness.py --priority high 2>&1 | tee /tmp/fkt-prop-harness.txt
+	@grep -q 'p2wpkh_proprietary_passthrough.*PASS.*proprietary passthrough ok' /tmp/fkt-prop-harness.txt
+	@echo "PASS test-proprietary"

@@ -14,7 +14,8 @@
     "p2sh_p2wpkh": "sign_if_key_matches",
     "p2wsh": "partial_sig_only",
     "p2tr_script_path": "keypath_fixtures_sign_until_true_scriptpath",
-    "notes": "Nested P2SH-P2WPKH: sign when BIP32 paths match seed (partial_sig insert; finalization may differ from Sparrow). P2WSH: partial_sig only. Current sparrow-taproot-scriptpath* fixtures are KEYPATH spends (have 0x17, no TAP_MERKLE_ROOT 0x18 / TAP_LEAF_SCRIPT 0x15) \u2014 expect=sign. True script-path reject/sign vectors land with 0.2 crypto."
+    "notes": "Nested P2SH-P2WPKH: sign when BIP32 paths match seed (partial_sig insert; finalization may differ from Sparrow). P2WSH: partial_sig only. Current sparrow-taproot-scriptpath* fixtures are KEYPATH spends (have 0x17, no TAP_MERKLE_ROOT 0x18 / TAP_LEAF_SCRIPT 0x15) \u2014 expect=sign. True script-path reject/sign vectors land with 0.2 crypto. Proprietary 0xFC keys (global/input/output) pass through on sign (v0.2.2).",
+    "proprietary_0xfc": "passthrough_sign"
   },
   "seeds": {
     "call_release": {
@@ -63,6 +64,26 @@
       "checklist": {
         "unsigned": true,
         "sparrow_signed": true,
+        "fkt_signed": true,
+        "verified": true
+      }
+    },
+    {
+      "id": "p2wpkh_proprietary_passthrough",
+      "unsigned": "unsigned/p2wpkh_proprietary_passthrough.psbt",
+      "sparrow_signed": null,
+      "fkt_signed": "fkt-signed/p2wpkh_proprietary_passthrough.psbt",
+      "expect": "sign",
+      "script": "p2wpkh",
+      "priority": "high",
+      "seed_ref": "legacy_p2wpkh_hex",
+      "seed_env": "FKT_SPARROW_SEED",
+      "check_proprietary": true,
+      "notes": "Session B P2.1: dummy bark-shaped 0xFC proprietary on global+input+output must survive sign",
+      "fkt_signed_status": "golden",
+      "checklist": {
+        "unsigned": true,
+        "sparrow_signed": false,
         "fkt_signed": true,
         "verified": true
       }
