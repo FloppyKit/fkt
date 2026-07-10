@@ -43,6 +43,9 @@ def main():
     # offline green-on-black
     failed += check("retro_green", "#00ff66" in text or "--fg:#00ff66" in text, "")
     failed += check("airgap_warning", "AIR-GAP" in text, "")
+    failed += check("main_menu", "MAIN MENU" in text, "")
+    failed += check("status_footer", "foot-seed" in text and "foot-psbt" in text, "")
+    failed += check("scan_first", "btn-psbt-to-manual" in text and "btn-seed-to-manual" in text, "")
     print("-" * 50)
     if failed:
         print("PWA smoke FAIL", failed)

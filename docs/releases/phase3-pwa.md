@@ -7,13 +7,12 @@
 
 ## What it does
 
-Retro **green-on-black** single-file companion:
+Retro **green-on-black** single-file companion shaped like the **TUI**:
 
-1. Drag/drop or paste **PSBT** (binary / Base64)  
-2. **Preview** inputs/outputs/fee/paths/0xFC count (no seed yet)  
-3. **BIP39** seed entry + checksum + optional random **3-word verify**  
-4. **Sign** keypath **P2WPKH** + **P2TR** (paths from PSBT)  
-5. **Base64** out, download `.psbt`, dense **ASCII QR**
+- **Main menu** (Load seed / Load PSBT / Preview / Sign / Show seed / Create wallet / Exit)
+- **Pinned bottom status**: Seed + PSBT load state (emoji alerts)
+- **Load screens default to QR camera scan**; button under capture: “Can’t scan? Type / browse”
+- Preview (no seed) · Sign with CONFIRM · Base64 / download / dense ASCII QR
 
 ## How to run (X280 / any browser)
 
