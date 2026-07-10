@@ -15,7 +15,12 @@
 #include "fkt_qr.h"
 #include "fkt_version.h"
 #include "fkt_platform.h"
+#include "fkt_build.h"
 #include "fkt_error.h"
+#if defined(FKT_WARM_WALLET) && FKT_WARM_WALLET
+#include "fkt_seed_file.h"
+#include "fkt_warm_settings.h"
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -35,6 +40,12 @@ static void print_usage_brief(const char *prog) {
     fprintf(stderr, "       %s sign --base64 <cHNidP...> --out <out> [--seed ...] [--yes]\n",
             prog);
     fprintf(stderr, "       %s base64 <file.psbt>   (print clean Base64)\n", prog);
+#if defined(FKT_WARM_WALLET) && FKT_WARM_WALLET
+    fprintf(stderr, "       %s sign ... --seed-file <path.fkt> [--passphrase ...]\n", prog);
+    fprintf(stderr, "       %s save-seed --out <path.fkt> --seed \"words...\" [--passphrase ...]\n",
+            prog);
+    fprintf(stderr, "       %s set-autoload <path.fkt>   (Warm settings)\n", prog);
+#endif
     fprintf(stderr, "       %s                    (interactive menu)\n", prog);
 #if FKT_BUILD_DEV_HARNESS
     fprintf(stderr, "       Dev: sign <in> <out> \"mnemonic\" | <hex128> <path> <in> <out>\n");
@@ -207,6 +218,11 @@ static int fkt_cli_run_sign(int argc, char **argv) {
     const char *psbt_in = NULL;
     const char *psbt_out = NULL;
     const char *seed_str = NULL;
+#if defined(FKT_WARM_WALLET) && FKT_WARM_WALLET
+    const char *seed_file = NULL;
+    const char *passphrase = "";
+    char autoload[FKT_WARM_PATH_MAX];
+#endif
     int yes = 0;
     int want_qr = 0;
     int i;
@@ -216,6 +232,9 @@ static int fkt_cli_run_sign(int argc, char **argv) {
     int have_seed = 0;
 
     memset(words, 0, sizeof(words));
+#if defined(FKT_WARM_WALLET) && FKT_WARM_WALLET
+    autoload[0] = '\0';
+#endif
 
     for (i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--psbt") == 0 && i + 1 < argc) {
@@ -236,6 +255,12 @@ static int fkt_cli_run_sign(int argc, char **argv) {
         } else if ((strcmp(argv[i], "--seed") == 0 ||
                     strcmp(argv[i], "--mnemonic") == 0) && i + 1 < argc) {
             seed_str = argv[++i];
+#if defined(FKT_WARM_WALLET) && FKT_WARM_WALLET
+        } else if (strcmp(argv[i], "--seed-file") == 0 && i + 1 < argc) {
+            seed_file = argv[++i];
+        } else if (strcmp(argv[i], "--passphrase") == 0 && i + 1 < argc) {
+            passphrase = argv[++i];
+#endif
         } else if (strcmp(argv[i], "--yes") == 0 || strcmp(argv[i], "-y") == 0) {
             yes = 1;
         } else if (strcmp(argv[i], "--qr") == 0) {
@@ -263,11 +288,22 @@ static int fkt_cli_run_sign(int argc, char **argv) {
                 "       %s sign --base64 <cHNidP...> --out <out.psbt> "
                 "[--seed ...] [--yes] [--qr]\n",
                 argv[0]);
+#if defined(FKT_WARM_WALLET) && FKT_WARM_WALLET
+        fprintf(stderr,
+                "       Warm: --seed-file path.fkt [--passphrase X]\n");
+#endif
         fprintf(stderr,
                 "       Preview runs before seed. Interactive seed if no --seed "
                 "on a TTY; else one-line stdin.\n");
         return 1;
     }
+
+#if defined(FKT_WARM_WALLET) && FKT_WARM_WALLET
+    if (seed_str && seed_file) {
+        fprintf(stderr, "Use only one of --seed or --seed-file.\n");
+        return 1;
+    }
+#endif
 
     if (yes)
         fkt_confirm_set_enabled(0);
@@ -282,13 +318,38 @@ static int fkt_cli_run_sign(int argc, char **argv) {
         return 1;
     }
 
-    /* 2) Seed: --seed / interactive TTY / stdin line. */
+    /* 2) Seed: --seed / Warm --seed-file / autoload / interactive / stdin. */
     if (seed_str) {
         if (!fkt_seed_from_string(seed_str, words, &num_words)) {
             fprintf(stderr, "Invalid mnemonic (need 12 or 24 BIP39 words).\n");
             return 1;
         }
         have_seed = 1;
+#if defined(FKT_WARM_WALLET) && FKT_WARM_WALLET
+    } else if (seed_file) {
+        fprintf(stderr, "\n*** WARM WALLET: loading encrypted seed file ***\n");
+        if (fkt_seed_file_load(seed_file, words, &num_words, passphrase) != 0) {
+            const char *cerr = fkt_last_error_get();
+            if (cerr && cerr[0])
+                fprintf(stderr, "%s\n", cerr);
+            else
+                fprintf(stderr, "Failed to load --seed-file.\n");
+            return 1;
+        }
+        have_seed = 1;
+    } else if (fkt_warm_settings_load(NULL, autoload, sizeof(autoload)) == 0 &&
+               autoload[0] != '\0') {
+        fprintf(stderr, "\n*** WARM WALLET: autoload_seed=%s ***\n", autoload);
+        if (fkt_seed_file_load(autoload, words, &num_words, passphrase) != 0) {
+            const char *cerr = fkt_last_error_get();
+            if (cerr && cerr[0])
+                fprintf(stderr, "%s\n", cerr);
+            else
+                fprintf(stderr, "Failed to load autoload seed file.\n");
+            return 1;
+        }
+        have_seed = 1;
+#endif
     } else if (fkt_tty_is_interactive()) {
         fkt_ui_term_init();
         if (!fkt_interactive_seed(words, &num_words)) {
@@ -367,6 +428,97 @@ static int fkt_cli_run_base64(int argc, char **argv) {
         return 1;
     return 0;
 }
+
+#if defined(FKT_WARM_WALLET) && FKT_WARM_WALLET
+/*
+ * save-seed --out path.fkt --seed "words..." [--passphrase X]
+ * save-seed --out path.fkt [--passphrase X]   (mnemonic on stdin)
+ */
+static int fkt_cli_run_save_seed(int argc, char **argv) {
+    const char *out_path = NULL;
+    const char *seed_str = NULL;
+    const char *passphrase = "";
+    char words[MAX_WORDS][WORD_BUF];
+    int num_words = 0;
+    char seed_line[512];
+    int i;
+
+    memset(words, 0, sizeof(words));
+    for (i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--out") == 0 && i + 1 < argc)
+            out_path = argv[++i];
+        else if (strcmp(argv[i], "--save-seed") == 0 && i + 1 < argc)
+            out_path = argv[++i]; /* alias: --save-seed path */
+        else if ((strcmp(argv[i], "--seed") == 0 ||
+                  strcmp(argv[i], "--mnemonic") == 0) && i + 1 < argc)
+            seed_str = argv[++i];
+        else if (strcmp(argv[i], "--passphrase") == 0 && i + 1 < argc)
+            passphrase = argv[++i];
+        else {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            return 1;
+        }
+    }
+    if (!out_path) {
+        fprintf(stderr,
+                "Usage: %s save-seed --out <path.fkt> --seed \"words...\" "
+                "[--passphrase X]\n",
+                argv[0]);
+        return 1;
+    }
+
+    fprintf(stderr,
+            "\n*** WARM WALLET — encrypted seed file ***\n"
+            "*** Ritual / founding cohort / education only.\n"
+            "*** Do NOT use for mainnet cold storage on untrusted hosts.\n\n");
+
+    if (!seed_str) {
+        if (!fgets(seed_line, sizeof(seed_line), stdin)) {
+            fprintf(stderr, "No seed on stdin and no --seed given.\n");
+            return 1;
+        }
+        {
+            size_t n = strlen(seed_line);
+            while (n > 0 && (seed_line[n - 1] == '\n' || seed_line[n - 1] == '\r'))
+                seed_line[--n] = '\0';
+        }
+        seed_str = seed_line;
+    }
+    if (!fkt_seed_from_string(seed_str, words, &num_words)) {
+        fkt_memzero(seed_line, sizeof(seed_line));
+        fprintf(stderr, "Invalid mnemonic.\n");
+        return 1;
+    }
+    fkt_memzero(seed_line, sizeof(seed_line));
+
+    if (fkt_seed_file_save(out_path, words, num_words, passphrase) != 0) {
+        const char *cerr = fkt_last_error_get();
+        fkt_secure_zero(words, sizeof(words));
+        if (cerr && cerr[0])
+            fprintf(stderr, "%s\n", cerr);
+        else
+            fprintf(stderr, "save-seed failed.\n");
+        return 1;
+    }
+    fkt_secure_zero(words, sizeof(words));
+    printf("Encrypted seed file written: %s\n", out_path);
+    return 0;
+}
+
+static int fkt_cli_run_set_autoload(int argc, char **argv) {
+    if (argc < 3) {
+        fprintf(stderr, "Usage: %s set-autoload <path.fkt>\n", argv[0]);
+        return 1;
+    }
+    if (fkt_warm_settings_set_autoload(NULL, argv[2]) != 0) {
+        const char *cerr = fkt_last_error_get();
+        if (cerr && cerr[0])
+            fprintf(stderr, "%s\n", cerr);
+        return 1;
+    }
+    return 0;
+}
+#endif
 
 static int fkt_cli_run_qr(int argc, char **argv) {
     char b64[FKT_QR_MAX_PAYLOAD + 1];
@@ -533,6 +685,13 @@ int main(int argc, char **argv) {
             return 1;
         return 0;
     }
+
+#if defined(FKT_WARM_WALLET) && FKT_WARM_WALLET
+    if (argc >= 2 && strcmp(argv[1], "save-seed") == 0)
+        return fkt_cli_run_save_seed(argc, argv);
+    if (argc >= 2 && strcmp(argv[1], "set-autoload") == 0)
+        return fkt_cli_run_set_autoload(argc, argv);
+#endif
 
     /* PR5: pure CLI sign (always on, DOS + Linux). */
     if (argc >= 2 && strcmp(argv[1], "sign") == 0)

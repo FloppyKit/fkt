@@ -1342,7 +1342,11 @@ void fkt_cli_print_help(FILE *fp) {
 void fkt_cli_print_version(FILE *fp) {
     if (!fp)
         fp = stdout;
+#if defined(FKT_WARM_WALLET) && FKT_WARM_WALLET
+    fprintf(fp, "fkt %s (warm)\n", FKT_VERSION_STRING);
+#else
     fprintf(fp, "fkt %s\n", FKT_VERSION_STRING);
+#endif
 }
 
 int fkt_cli_sign_success_interact(const char *out_psbt) {

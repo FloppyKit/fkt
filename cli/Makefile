@@ -47,10 +47,17 @@ BASE_OBJS = main.o \
        fkt_qrgen_wrap.o \
        fkt_qrgen.o
 
+# Warm-only modules (never linked into default Ice Cold build)
+WARM_OBJS = fkt_aes.o fkt_aes_gcm.o fkt_seed_file.o fkt_warm_settings.o
+
 ifeq ($(NO_FINALIZER),1)
 OBJS = $(filter-out fkt_finalizer.o,$(BASE_OBJS))
 else
 OBJS = $(BASE_OBJS)
+endif
+
+ifdef WARM
+OBJS += $(WARM_OBJS)
 endif
 
 .PHONY: all warm fktsigner-release fktsigner-dos test-sparrow test-qr test-parse sparrow-base64 clean fuzz fuzz-corpus
@@ -77,7 +84,14 @@ floppy-stage:
 	@echo "PASS floppy-stage"
 
 warm:
+	$(MAKE) clean
 	$(MAKE) WARM=1 fktsigner fkt
+	@echo "Built WARM wallet binary (FKT_WARM_WALLET=1)"
+
+.PHONY: test-warm
+test-warm: warm
+	python3 tests/run_warm_seed_file.py
+	@echo "PASS test-warm"
 
 fkt: fktsigner
 	ln -sf fktsigner fkt
@@ -160,6 +174,7 @@ fuzz: fkt_fuzz fuzz-corpus
 
 clean:
 	rm -f *.o fktsigner verify_ecdsa fkt_fuzz test_parse psbt_parse_test test_qr test_bip_vectors
+	rm -f fkt_aes.o fkt_aes_gcm.o fkt_seed_file.o fkt_warm_settings.o
 # --- Matrix / v0.2 harness (from test-matrix branch) ---
 .PHONY: test-sparrow-real test-sparrow-real-list test-sparrow-real-golden test-scriptpath test-scriptpath-ark test-parity-linux
 
