@@ -1,14 +1,29 @@
 # FKT — Floppy Kit
 
-**Will it bitcoin? – Git fkt.**  
-**Signing Bitcoin in 1991.**  
-**Y0UR H4RDW4R3 15 TH3 W4LL3T**
+<table>
+<tr>
+<td width="60%">
+
+
+# **Will it Bitcoin?  –  Git FKT**  
+ **Signing Bitcoin in 1991.**  
+ 
+ **Y0UR H4RDW4R3 15 TH3 W4LL3T**
+
+
+</td>
+<td width="40%">
+<img width="360" height="480" alt="fktlogo" src="https://github.com/user-attachments/assets/2c5baf87-cf6f-4f9d-afcc-882a3fc40f20" />
+</td>
+</tr>
+</table>
+
 
 A minimal, paranoid, air-gapped Bitcoin PSBT signer that runs on hardware from 1991 onward and fits on a real 1.44 MB floppy.
 
-<img width="360" height="480" alt="fktlogo" src="https://github.com/user-attachments/assets/2c5baf87-cf6f-4f9d-afcc-882a3fc40f20" />
 
-> **⚠️ PRE-ALPHA / TESTNET & EXPERIMENTAL USE ONLY**  
+
+> **⚠️ ALPHA / TESTNET & EXPERIMENTAL USE ONLY**  
 > Do **not** use with real funds.  
 > This is still early, actively changing code. Expect breaking changes and rough edges.  
 > Feedback, test vectors, and brutal review are welcome.
@@ -64,8 +79,10 @@ DOS / floppy build instructions live in cli/docs/ and dist/floppy-iced-cold/.
 Hardware Notes
 
 Extreme retro path: 486 (or equivalent) + 3.5" 1.44 MB floppy drive
+
 Modern air-gapped path: any machine that can run the C binary + a second device for QR / file handoff
-The 486 validation weekend is the next major milestone
+
+486 validation Txid: 92fc1a0e1d4d54d4b1e9cda801f0f4065a75be38fd6752385957167ca7de54c7
 
 Security Model (short version)
 
@@ -76,9 +93,11 @@ Preview + confirmation before any private key material is derived
 
 Credits
 Floppy Kit is a collaboration between human and machine.
-Core architecture, constraints, and significant development by Grok (xAI) as a core member of the Floppy Kit team.
+The current iteration has significant code contributions by Deepseek and Grok
+Grok is as a core member of the Floppy Kit team.
 License
 MIT — see LICENSE
 
-Coded proudly in C89.
-Bare metal Bitcoin.
+***Coded proudly in C89***
+
+***Bare Metal Bitcoin***
