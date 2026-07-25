@@ -106,9 +106,10 @@ DOS / floppy build instructions live in cli/docs/ and dist/floppy-iced-cold/.
 ### Hardware Notes
 
 - **Extreme retro path**: 486 (or equivalent) + 3.5" 1.44 MB floppy drive  
-- **Modern air-gapped path**: any machine that can run the C binary + a second device for QR / file handoff
+- **Modern air-gapped path**: any machine that can run the C binary + a second device for QR / file handoff  
+- 486 validation Txid: [`92fc1a0e1d4d54d4b1e9cda801f0f4065a75be38fd6752385957167ca7de54c7`](https://mempool.space/testnet4/tx/92fc1a0e1d4d54d4b1e9cda801f0f4065a75be38fd6752385957167ca7de54c7)  
+  Video: [https://youtu.be/5cx2mUk7aFg?si=VOPCjg8rHnIMOoEA](https://youtu.be/5cx2mUk7aFg?si=VOPCjg8rHnIMOoEA)
   
-- 486 validation Txid: `92fc1a0e1d4d54d4b1e9cda801f0f4065a75be38fd6752385957167ca7de54c7`
 
 ### Security Model (short version)
 
