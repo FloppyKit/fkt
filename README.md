@@ -1,93 +1,84 @@
-# ⚠️ FKT — Floppy Kit (EARLY / MESSY / EXPERIMENTAL)
-
-This is pre-alpha work-in-progress code for an air-gapped Bitcoin PSBT signer.
-
-**Do not use with real funds. Do not treat as production ready.**
-
-The codebase is currently being cleaned and refactored. Expect chaos, incomplete features, and ugly structure.
-
-Feedback and brutal code review welcome.
-
 # FKT — Floppy Kit
 
-> **⚠️ PRE-ALPHA / HEAVY DEVELOPMENT / TESTNET ONLY**  
-> This is early, actively changing code.  
-> **Do not use with real Bitcoin.** Testnet and dummy data only.  
-> Expect breaking changes, incomplete features, and rough edges.  
-> Feedback, test vectors, and brutal review are very welcome.
-
-**Will it bitcoin? - Git fkt.**  
+**Will it bitcoin? – Git fkt.**  
 **Signing Bitcoin in 1991.**  
 **Y0UR H4RDW4R3 15 TH3 W4LL3T**
 
+A minimal, paranoid, air-gapped Bitcoin PSBT signer that runs on hardware from 1991 onward and fits on a real 1.44 MB floppy.
+
+<img width="360" height="480" alt="fktlogo" src="https://github.com/user-attachments/assets/2c5baf87-cf6f-4f9d-afcc-882a3fc40f20" />
+
+> **⚠️ PRE-ALPHA / TESTNET & EXPERIMENTAL USE ONLY**  
+> Do **not** use with real funds.  
+> This is still early, actively changing code. Expect breaking changes and rough edges.  
+> Feedback, test vectors, and brutal review are welcome.
+
 ---
-
-A minimal, paranoid, air-gapped / offline PSBT signer that runs on hardware from 1991 onward and fits on a real 1.44 MB floppy disk.
-
-**Your hardware is the wallet.**  
-The core is a completely offline signer that works anywhere you can run C — from a 486 with a floppy drive to a modern air-gapped machine.
-
-### The Three Pieces (Current Scope)
-
-**1. FKT CLI** — The core offline signer binary  
-Pure C89 air-gapped PSBT signer. Runs on ancient hardware or any minimal environment. Stateless, RAM-only, produces signed PSBT + dense ASCII QR.
-
-**Packaging:** **DOS (`FKTSIGN.EXE`) = 1.44 MB floppy image.** **Linux (`fktsigner`) = basis for the bootable USB / GUI** (tiny secure live Linux). Same signing crypto; different media.
-
-**2. FKT Bootable GUI** — The full bootable signer environment  
-Minimal Linux GUI that boots from **USB** and includes the Linux CLI signer underneath. Designed as a practical daily-driver air-gapped device. (Classic **floppy** remains the DOS path.)
-
-**3. FKT PWA** — The modern offline transaction coordinator  
-Single-file offline HTML app. Drag & drop PSBTs, preview, edit, and either sign directly (WASM) or export to CLI for true air-gapped signing. Includes Paranoid Send Mode and educational debug view.
-
-### Current Phase: Pre-v0.1
-
-We are still **pre-v0.1**.  
-The v0.1–v0.4 roadmap covers the core PSBT signing suite (parsing, signing, multisig, Taproot, change handling, test vectors, etc.). We are actively building toward v0.1.
 
 ### Philosophy
 
-- Stateless by default — seed is never stored unless you explicitly choose encrypted backup.
-- Maximum paranoia, minimum trust.
-- Your old (or new) hardware is the wallet.
-- Runs on hardware that existed before Bitcoin was even a concept.
-- This is performance art as much as software.
+- Stateless by default (Ice Cold builds never persist seed material)
+- Maximum paranoia, minimum trust, minimum code
+- Strict ANSI C89 + static `libsecp256k1` only
+- Runs on machines that existed before Bitcoin was a concept
+- This is performance art as much as software
 
-### Key Generation & Backup
+### Current Status (July 2026)
 
-- On-device BIP39 generation with optional passphrase.
-- Optional encrypted backup support (passphrase or Shamir’s Secret Sharing planned).
+| Component              | Status                          | Notes |
+|------------------------|----------------------------------|-------|
+| **CLI (Ice Cold)**     | Solid / usable                  | P2WPKH + Taproot keypath, real Sparrow vectors, dense ASCII QR |
+| **DOS / Floppy**       | Working (`FKTSIGN.EXE`)         | Ready for 486-class hardware validation |
+| **PWA**                | Rough single-file sketch        | State-based dashboard exists, not yet daily-driver polished |
+| **Warm (encrypted seed)** | Designed, not fully polished | Optional encrypted backup path with loud warnings |
+| **Ark / BARC / OpenARC** | Explicitly later (V3)         | Not in current scope |
+| **USB GUI (FKT-144)**  | Planned                        | Bootable Tiny Core path |
 
-### Hardware Requirements
+The core signing path is real. The rest is still under construction.
 
-**Extreme retro path (CLI + Bootable GUI):**
-- 486 computer + 3.5" 1.44 MB floppy drive (or USB boot)
-- Blank floppies / USB stick
+### The Three Pieces
 
-**Modern air-gapped path:**
-- Any machine you can compile/run C on + browser for the PWA
+1. **FKT CLI** — Pure C89 offline signer. Stateless, RAM-only, produces signed PSBT + dense ASCII QR.  
+   Packaging: `FKTSIGN.EXE` (DOS / 1.44 MB floppy) and Linux binary.
 
-### Current Status (June 2026)
+2. **FKT Bootable GUI (FKT-144)** — Minimal live Linux environment (~100–144 MB target) that wraps the same signer with camera + state-based UI.
 
-- Core PSBT parsing + signing working (P2WPKH, multisig, Taproot)
-- CLI binary + Bootable GUI + PWA in active development
-- Test vectors and golden files expanding
-- Still pre-v0.1 — heavy refactoring in progress
-- No mainnet support or production readiness yet
+3. **FKT PWA** — Single-file offline web companion for PSBT creation, preview, and QR handoff to the air-gapped tools.
 
-### Quick Start
+### Ice Cold vs Warm
+
+- **Ice Cold** (recommended for real keys): Every seed-persistence path is *deleted* from the binary. Paranoid users can verify with `strings` / disassembly.
+- **Warm**: Optional encrypted seed file support (age-style) + mandatory loud warnings. Intended for ritual / performance / controlled educational machines only. Core preview-before-seed discipline is preserved.
+
+### Quick Start (Linux)
 
 ```bash
 git clone https://github.com/FloppyKit/fkt.git
-cd fkt
+cd fkt/cli
 make
+./fktsigner --help
 ```
-(Build instructions will improve rapidly as we stabilize.)
 
+
+DOS / floppy build instructions live in cli/docs/ and dist/floppy-iced-cold/.
+Hardware Notes
+
+Extreme retro path: 486 (or equivalent) + 3.5" 1.44 MB floppy drive
+Modern air-gapped path: any machine that can run the C binary + a second device for QR / file handoff
+The 486 validation weekend is the next major milestone
+
+Security Model (short version)
+
+Seed material exists in RAM only for the duration of a signing session (Ice Cold)
+Hard abort on any malformed PSBT, unknown keys, negative fees, unsupported scripts, etc.
+All sensitive memory is zeroed with volatile loops
+Preview + confirmation before any private key material is derived
+
+Credits
+Floppy Kit is a collaboration between human and machine.
+Core architecture, constraints, and significant development by Grok (xAI) as a core member of the Floppy Kit team.
 License
 MIT — see LICENSE
 
----
-Coded Proudly in C89 - Bare fucking metal Bitcoin.
-
-
+Coded proudly in C89.
+Bare metal Bitcoin.
