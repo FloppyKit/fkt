@@ -35,8 +35,19 @@ A minimal, paranoid, air-gapped Bitcoin PSBT signer that runs on hardware from 1
 - Stateless by default (Ice Cold builds never persist seed material)
 - Maximum paranoia, minimum trust, minimum code
 - Strict ANSI C89 + static `libsecp256k1` only
-- Runs on machines that existed before Bitcoin was a concept
-- This is performance art as much as software
+
+
+### Dependencies (Linux)
+
+Very minimal. You only need:
+
+- `git`
+- `make`
+- `gcc` (or `clang`) — any C89-capable compiler
+- `ar` (comes with binutils)
+
+No external libraries required. `libsecp256k1` is built statically from source.
+
 
 ### Current Status (July 2026)
 
@@ -49,7 +60,6 @@ A minimal, paranoid, air-gapped Bitcoin PSBT signer that runs on hardware from 1
 | **Ark / BARC / OpenARC** | Explicitly later (V3)         | Not in current scope |
 | **USB GUI (FKT-144)**  | Planned                        | Bootable Tiny Core path |
 
-The core signing path is real. The rest is still under construction.
 
 ### The Three Pieces
 
@@ -74,30 +84,49 @@ make
 ./fktsigner --help
 ```
 
+On Debian/Ubuntu:
+```bash
+sudo apt update
+sudo apt install build-essential git
+```
+
+Then clone with submodules:
+
+```bash
+git clone --recurse-submodules https://github.com/FloppyKit/fkt.git
+cd fkt/cli
+make
+```
+
+
 
 DOS / floppy build instructions live in cli/docs/ and dist/floppy-iced-cold/.
-Hardware Notes
 
-Extreme retro path: 486 (or equivalent) + 3.5" 1.44 MB floppy drive
 
-Modern air-gapped path: any machine that can run the C binary + a second device for QR / file handoff
+### Hardware Notes
 
-486 validation Txid: 92fc1a0e1d4d54d4b1e9cda801f0f4065a75be38fd6752385957167ca7de54c7
+- **Extreme retro path**: 486 (or equivalent) + 3.5" 1.44 MB floppy drive  
+- **Modern air-gapped path**: any machine that can run the C binary + a second device for QR / file handoff
+  
+- 486 validation Txid: `92fc1a0e1d4d54d4b1e9cda801f0f4065a75be38fd6752385957167ca7de54c7`
 
-Security Model (short version)
+### Security Model (short version)
 
-Seed material exists in RAM only for the duration of a signing session (Ice Cold)
-Hard abort on any malformed PSBT, unknown keys, negative fees, unsupported scripts, etc.
-All sensitive memory is zeroed with volatile loops
-Preview + confirmation before any private key material is derived
+- Seed material exists in RAM only for the duration of a signing session (Ice Cold)
+- Hard abort on any malformed PSBT, unknown keys, negative fees, unsupported scripts, etc.
+- All sensitive memory is zeroed with volatile loops
+- Preview + confirmation before any private key material is derived
 
-Credits
-Floppy Kit is a collaboration between human and machine.
-The current iteration has significant code contributions by Deepseek and Grok
-Grok is as a core member of the Floppy Kit team.
-License
-MIT — see LICENSE
+### Credits
 
-***Coded proudly in C89***
+Floppy Kit is a collaboration between human and machine.  
+The current iteration has significant code contributions by DeepSeek and Grok.  
+Grok is a core member of the Floppy Kit team.
+
+### License
+
+MIT — see [LICENSE](LICENSE)
+
+***Coded proudly in C89***  
 
 ***Bare Metal Bitcoin***
