@@ -181,15 +181,16 @@ html[data-crt="amber"] .toggle::after { transform: translateX(20px); }
   background: var(--crt-bg);
 }
 
-/* Scan target */
+/* Scan target — full-bleed video + tighter corner frame */
 .scan-target {
   border: 1px solid var(--crt-border);
   background: #000;
-  min-height: 210px;
-  display: flex;
-  flex-direction: column;
+  display: block;
   position: relative;
   overflow: hidden;
+  width: 100%;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 .scan-target.scanning,
 .scan-target.active { border-color: var(--crt-hi); }
@@ -198,38 +199,60 @@ html[data-crt="amber"] .toggle::after { transform: translateX(20px); }
   0%, 100% { border-color: var(--crt-border); }
   50% { border-color: var(--crt-hi); }
 }
-.scan-corners { pointer-events: none; position: absolute; inset: 10px; z-index: 2; }
-.scan-corners .c {
-  position: absolute; width: 18px; height: 18px;
-  border-color: var(--crt-hi); border-style: solid; border-width: 0;
-}
-.scan-corners .tl { top: 0; left: 0; border-top-width: 2px; border-left-width: 2px; }
-.scan-corners .tr { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; }
-.scan-corners .bl { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; }
-.scan-corners .br { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; }
-.scan-camera-body {
-  z-index: 1;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 1.25rem 1rem 1rem;
-  background: radial-gradient(ellipse at center, rgba(0,42,20,0.55) 0%, #000 70%);
-  text-align: center;
+.scan-frame {
   position: relative;
-  min-height: 200px;
   width: 100%;
+  aspect-ratio: 3 / 4;
+  max-height: min(52vh, 420px);
+  min-height: 240px;
+  background: #000;
+  overflow: hidden;
+}
+@media (min-width: 480px) {
+  .scan-frame { aspect-ratio: 4 / 3; max-height: min(48vh, 360px); }
 }
 #scan-video {
+  position: absolute;
+  inset: 0;
   width: 100%;
-  max-height: 240px;
+  height: 100%;
   object-fit: cover;
-  background: #001100;
+  object-position: center;
+  background: #000;
+  z-index: 1;
   display: block;
 }
+#scan-video.hidden { display: none; }
+/* Never display:none the canvas while decoding — some mobile browsers break getImageData */
+.scan-canvas-offscreen {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.scan-corners {
+  pointer-events: none;
+  position: absolute;
+  /* tighter reticle over the actual preview, not the outer chrome */
+  inset: 14%;
+  z-index: 4;
+}
+.scan-corners .c {
+  position: absolute; width: 22px; height: 22px;
+  border-color: var(--crt-hi); border-style: solid; border-width: 0;
+}
+.scan-corners .tl { top: 0; left: 0; border-top-width: 3px; border-left-width: 3px; }
+.scan-corners .tr { top: 0; right: 0; border-top-width: 3px; border-right-width: 3px; }
+.scan-corners .bl { bottom: 0; left: 0; border-bottom-width: 3px; border-left-width: 3px; }
+.scan-corners .br { bottom: 0; right: 0; border-bottom-width: 3px; border-right-width: 3px; }
 .scan-idle {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -237,7 +260,21 @@ html[data-crt="amber"] .toggle::after { transform: translateX(20px); }
   gap: 0.45rem;
   width: 100%;
   text-align: center;
+  padding: 1rem;
+  background: radial-gradient(ellipse at center, rgba(0,42,20,0.55) 0%, #000 70%);
 }
+.scan-idle.hidden { display: none !important; }
+.scan-stop {
+  position: absolute;
+  left: 50%;
+  bottom: 0.65rem;
+  transform: translateX(-50%);
+  z-index: 5;
+  min-height: 2.1rem !important;
+  padding: 0.4rem 0.9rem !important;
+  font-size: 0.72rem !important;
+}
+/* scan-idle layout defined with overlay styles above */
 .scan-cam-wrap {
   display: flex;
   justify-content: center;
@@ -771,20 +808,19 @@ html[data-crt="amber"] .toggle::after { transform: translateX(20px); }
     <main class="crt-main">
       <!-- SCAN ZONE -->
       <section class="scan-target" id="scanTarget" role="region" aria-label="QR scan target">
-        <div class="scan-corners" aria-hidden="true">
-          <span class="c tl"></span><span class="c tr"></span>
-          <span class="c bl"></span><span class="c br"></span>
-        </div>
-        <div class="scan-camera-body">
+        <div class="scan-frame">
+          <video id="scan-video" class="hidden" playsinline webkit-playsinline muted autoplay></video>
+          <canvas id="scan-canvas" class="scan-canvas-offscreen" aria-hidden="true"></canvas>
+          <div class="scan-corners" aria-hidden="true">
+            <span class="c tl"></span><span class="c tr"></span>
+            <span class="c bl"></span><span class="c br"></span>
+          </div>
           <div id="scanIdle" class="scan-idle">
             <div class="scan-cam-wrap" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="scan-cam-icon"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3"></circle></svg></div>
             <div class="scan-title"><span>TAP TO SCAN QR</span></div>
             <p class="scan-hint">Unified smart scan. Auto-detects seed vs PSBT and slots correctly.</p>
           </div>
-          <div id="scanVideoHost"></div>
-          <video id="scan-video" class="hidden" playsinline muted></video>
-          <canvas id="scan-canvas" class="hidden"></canvas>
-          <button type="button" class="crt-btn crt-btn-ghost hidden" id="btnStopScan" style="margin-top:0.5rem">STOP SCAN</button>
+          <button type="button" class="crt-btn crt-btn-ghost scan-stop hidden" id="btnStopScan">STOP SCAN</button>
         </div>
       </section>
       <div class="scan-status" id="scanStatusLine"></div>
@@ -2978,6 +3014,9 @@ globalThis.FKT_WORDLIST = {wordlist: e};
   /* camera / scan */
   let videoStream = null;
   let scanTimer = null;
+  let scanRaf = null;
+  let scanBusy = false;
+  let lastScanText = "";
   let scanning = false;
 
   /* keygen ritual */
@@ -3898,56 +3937,95 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       renderAll();
     } catch (e) {
       console.error(e);
-      setStatus(e.message || String(e), "err");
-    }
+      setStatus(e.message || Strin  function getJsQR() {
+    const j = typeof jsQR !== "undefined" ? jsQR : window.jsQR;
+    if (typeof j === "function") return j;
+    if (j && typeof j.default === "function") return j.default;
+    return null;
   }
 
-  /* ---------- QR scan unified ---------- */
+  function looksLikePsbt(text) {
+    const t = (text || "").replace(/\s+/g, "");
+    if (!t) return false;
+    if (t.startsWith("cHNidP") || t.startsWith("cHNidP8")) return true;
+    /* base64-ish payload */
+    if (/^[A-Za-z0-9+/]+=*$/.test(t) && t.length >= 40) {
+      try {
+        const b = b64ToBytes(t);
+        return b.length >= 5 && b[0] === 0x70 && b[1] === 0x73 && b[2] === 0x62 && b[3] === 0x74 && b[4] === 0xff;
+      } catch (e) {
+        return false;
+      }
+    }
+    /* hex PSBT */
+    if (/^[0-9a-fA-F]+$/.test(t) && t.length >= 10 && t.toLowerCase().startsWith("70736274")) return true;
+    return false;
+  }
+
+  function normalizeSeedText(text) {
+    let t = (text || "").trim();
+    t = t.replace(/^\uFEFF/, "");
+    /* common QR prefixes */
+    t = t.replace(/^(bip39|seed|mnemonic|words)\s*[:=]\s*/i, "");
+    t = t.replace(/^["']|["']$/g, "");
+    return t.trim().toLowerCase().replace(/\s+/g, " ");
+  }
+
+  function looksLikeSeed(text) {
+    const words = normalizeSeedText(text).split(" ").filter(Boolean);
+    return words.length === 12 || words.length === 15 || words.length === 18 || words.length === 21 || words.length === 24;
+  }
+
   function stopScan() {
     if (scanTimer) {
       clearInterval(scanTimer);
       scanTimer = null;
     }
+    if (scanRaf) {
+      cancelAnimationFrame(scanRaf);
+      scanRaf = null;
+    }
+    scanBusy = false;
     if (videoStream) {
-      videoStream.getTracks().forEach((t) => t.stop());
+      try {
+        videoStream.getTracks().forEach((t) => t.stop());
+      } catch (e) {}
       videoStream = null;
     }
     const v = $("scan-video");
     if (v) {
+      try {
+        v.pause();
+      } catch (e) {}
       v.srcObject = null;
       v.classList.add("hidden");
     }
     scanning = false;
     const tgt = $("scanTarget");
     if (tgt) tgt.classList.remove("scanning", "active");
-    $("scanIdle").classList.remove("hidden");
+    const idle = $("scanIdle");
+    if (idle) idle.classList.remove("hidden");
     if ($("btnStopScan")) $("btnStopScan").classList.add("hidden");
-  }
-
-  function looksLikePsbt(text) {
-    const t = text.replace(/\s+/g, "");
-    if (t.startsWith("cHNidP")) return true;
-    if (/^[A-Za-z0-9+/=]+$/.test(t) && t.length > 40) {
-      try {
-        const b = b64ToBytes(t);
-        return b[0] === 0x70 && b[1] === 0x73 && b[2] === 0x62 && b[3] === 0x74;
-      } catch (e) {
-        return false;
-      }
-    }
-    return false;
-  }
-  function looksLikeSeed(text) {
-    const words = text.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    return words.length === 12 || words.length === 24;
   }
 
   function onScanPayload(text) {
     text = (text || "").trim();
     if (!text) return;
+    /* debounce duplicate frames */
+    if (text === lastScanText) return;
+    lastScanText = text;
+
     if (looksLikePsbt(text)) {
       try {
-        loadPsbtFromBytes(b64ToBytes(text.replace(/\s+/g, "")));
+        let raw = text.replace(/\s+/g, "");
+        let bytes;
+        if (/^[0-9a-fA-F]+$/.test(raw) && raw.toLowerCase().startsWith("70736274")) {
+          bytes = new Uint8Array(raw.length / 2);
+          for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(raw.substr(i * 2, 2), 16);
+        } else {
+          bytes = b64ToBytes(raw);
+        }
+        loadPsbtFromBytes(bytes);
         stopScan();
         setStatus("Scanned PSBT", "ok");
       } catch (e) {
@@ -3957,71 +4035,154 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     }
     if (looksLikeSeed(text)) {
       try {
-        validateSeedFromText(text);
+        validateSeedFromText(normalizeSeedText(text));
         lowerView = "seed";
         stopScan();
         renderAll();
+        setStatus("Scanned seed · " + seedWords.length + " words", "ok");
       } catch (e) {
         setStatus("Scan seed: " + e.message, "err");
       }
       return;
     }
-    setStatus("QR not recognized as seed or PSBT", "err");
+    const preview = text.length > 48 ? text.slice(0, 48) + "…" : text;
+    setStatus("Found QR (" + text.length + " chars) — not a seed/PSBT: " + preview, "err");
   }
 
   async function startScan() {
     stopScan();
+    lastScanText = "";
     const video = $("scan-video");
     const canvas = $("scan-canvas");
+    if (!video || !canvas) {
+      setStatus("Scanner UI missing", "err");
+      return;
+    }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setStatus("Camera not available — use manual entry", "err");
       return;
     }
+
+    const decodeFn = getJsQR();
     try {
-      videoStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
-        audio: false,
-      });
-      video.srcObject = videoStream;
-      const host = $("scanVideoHost");
-      if (host && video.parentElement !== host) host.appendChild(video);
+      /* Prefer rear camera; fall back broadly for iOS */
+      let stream = null;
+      const tries = [
+        { video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+        { video: { facingMode: "environment" }, audio: false },
+        { video: true, audio: false },
+      ];
+      let lastErr = null;
+      for (const c of tries) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(c);
+          break;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (!stream) throw lastErr || new Error("getUserMedia failed");
+
+      videoStream = stream;
+      video.setAttribute("playsinline", "true");
+      video.setAttribute("webkit-playsinline", "true");
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
       video.classList.remove("hidden");
       $("scanIdle").classList.add("hidden");
-      await video.play();
-      scanning = true;
-      $("scanTarget").classList.add("scanning", "active");
       $("btnStopScan").classList.remove("hidden");
-      setStatus("Scanning… point at seed or PSBT QR", "ok");
-      const ctx = canvas.getContext("2d", { willReadFrequently: true });
-      const BD = window.BarcodeDetector;
+      $("scanTarget").classList.add("scanning", "active");
+      scanning = true;
+
+      /* wait for dimensions */
+      await new Promise((resolve) => {
+        if (video.readyState >= 2 && video.videoWidth) return resolve();
+        const done = () => {
+          video.removeEventListener("loadeddata", done);
+          video.removeEventListener("loadedmetadata", done);
+          resolve();
+        };
+        video.addEventListener("loadeddata", done);
+        video.addEventListener("loadedmetadata", done);
+        setTimeout(done, 1500);
+      });
+      try {
+        await video.play();
+      } catch (e) {
+        /* autoplay may need muted — already muted */
+      }
+
+      setStatus(
+        decodeFn || window.BarcodeDetector
+          ? "Scanning… hold QR inside the corner frame"
+          : "Camera live but QR decoder missing — use manual entry",
+        decodeFn || window.BarcodeDetector ? "ok" : "err"
+      );
+
+      const ctx = canvas.getContext("2d", { willReadFrequently: true, alpha: false });
       let detector = null;
-      if (BD) {
+      if (window.BarcodeDetector) {
         try {
-          detector = new BD({ formats: ["qr_code"] });
+          detector = new window.BarcodeDetector({ formats: ["qr_code"] });
         } catch (e) {
           detector = null;
         }
       }
-      scanTimer = setInterval(async () => {
-        if (!video.videoWidth) return;
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
+
+      const MAX_W = 480;
+      const tick = async () => {
+        if (!scanning || !videoStream) return;
+        if (scanBusy) return;
+        if (!video.videoWidth || !video.videoHeight) return;
+        scanBusy = true;
         try {
-          if (detector) {
-            const codes = await detector.detect(canvas);
-            if (codes && codes[0] && codes[0].rawValue) onScanPayload(codes[0].rawValue);
-          } else if (window.jsQR) {
-            const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const code = jsQR(img.data, img.width, img.height);
-            if (code && code.data) onScanPayload(code.data);
+          const vw = video.videoWidth;
+          const vh = video.videoHeight;
+          const scale = Math.min(1, MAX_W / vw);
+          const cw = Math.max(1, (vw * scale) | 0);
+          const ch = Math.max(1, (vh * scale) | 0);
+          if (canvas.width !== cw || canvas.height !== ch) {
+            canvas.width = cw;
+            canvas.height = ch;
           }
+          ctx.drawImage(video, 0, 0, cw, ch);
+
+          let payload = null;
+
+          /* Prefer jsQR on mobile — more reliable than BarcodeDetector for dense PSBT QR */
+          if (decodeFn) {
+            const img = ctx.getImageData(0, 0, cw, ch);
+            let code = decodeFn(img.data, cw, ch, { inversionAttempts: "attemptBoth" });
+            if (code && code.data) payload = code.data;
+          }
+
+          if (!payload && detector) {
+            try {
+              const codes = await detector.detect(canvas);
+              if (codes && codes.length && codes[0].rawValue) payload = codes[0].rawValue;
+            } catch (e) {
+              /* ignore detector errors */
+            }
+          }
+
+          if (payload) onScanPayload(payload);
         } catch (e) {
           /* keep scanning */
+        } finally {
+          scanBusy = false;
         }
-      }, 400);
+      };
+
+      scanTimer = setInterval(tick, 200);
     } catch (e) {
-      setStatus("Camera denied — use manual entry", "err");
+      console.error(e);
+      setStatus("Camera denied or unavailable — use manual entry", "err");
+      stopScan();
+    }
+  }
+
+amera denied — use manual entry", "err");
       stopScan();
     }
   }
