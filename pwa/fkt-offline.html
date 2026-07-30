@@ -123,15 +123,15 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 .toggle-wrap {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.4rem;
   flex-shrink: 0;
 }
 .offline-pill {
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   color: var(--crt-hi);
   border: 1px solid var(--crt-hi);
-  padding: 0.22rem 0.4rem;
-  font-size: 0.62rem;
+  padding: 0.18rem 0.35rem;
+  font-size: 0.58rem;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -139,36 +139,62 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   color: var(--crt-warn);
   border-color: var(--crt-warn);
 }
-.toggle-label {
-  letter-spacing: 0.1em;
-  color: var(--crt-mid);
-  font-size: 0.62rem;
-  font-weight: 700;
-  min-width: 3rem;
-  text-align: right;
-}
-.toggle {
-  border: 1px solid var(--crt-border);
-  background: var(--crt-track);
-  border-radius: 999px;
-  width: 48px;
+/* Compact yin-yang theme switch (green | amber) */
+.theme-yy {
+  width: 28px;
   height: 28px;
-  padding: 0;
-  position: relative;
-  flex-shrink: 0;
-}
-.toggle::after {
-  content: "";
-  background: var(--crt-knob);
   border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  transition: transform 0.16s;
+  border: 1px solid var(--crt-border);
+  padding: 0;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  background: transparent;
+  box-shadow: 0 0 0 1px #000 inset;
 }
-html[data-crt="amber"] .toggle::after { transform: translateX(20px); }
+.theme-yy::before,
+.theme-yy::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 50%;
+  height: 100%;
+}
+.theme-yy::before {
+  left: 0;
+  background: #3dff7a;
+}
+.theme-yy::after {
+  right: 0;
+  background: #fc4;
+}
+/* small opposite dots like yin-yang */
+.theme-yy .yy-dot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  z-index: 1;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.theme-yy .yy-dot.g {
+  left: calc(25% - 3px);
+  background: #0a2818;
+}
+.theme-yy .yy-dot.a {
+  right: calc(25% - 3px);
+  background: #3d2400;
+}
+html[data-crt="green"] .theme-yy {
+  box-shadow: 0 0 0 1px #3dff7a, 0 0 0 1px #000 inset;
+}
+html[data-crt="amber"] .theme-yy {
+  box-shadow: 0 0 0 1px #fc4, 0 0 0 1px #000 inset;
+}
+.theme-yy:active { transform: scale(0.94); }
 
 .crt-main {
   flex: 1;
@@ -800,8 +826,9 @@ html[data-crt="amber"] .toggle::after { transform: translateX(20px); }
       </div>
       <div class="toggle-wrap">
         <span class="offline-pill" id="offlinePill">OFFLINE</span>
-        <span class="toggle-label" id="themeLabel">GREEN</span>
-        <button type="button" class="toggle" id="themeToggle" aria-label="Toggle green or amber theme" title="Toggle green / amber CRT"></button>
+        <button type="button" class="theme-yy" id="themeToggle" aria-label="Toggle green or amber theme" title="Green / Amber">
+          <span class="yy-dot g"></span><span class="yy-dot a"></span>
+        </button>
       </div>
     </header>
 
@@ -3937,7 +3964,11 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       renderAll();
     } catch (e) {
       console.error(e);
-      setStatus(e.message || Strin  function getJsQR() {
+      setStatus(e.message || String(e), "err");
+    }
+  }
+
+  function getJsQR() {
     const j = typeof jsQR !== "undefined" ? jsQR : window.jsQR;
     if (typeof j === "function") return j;
     if (j && typeof j.default === "function") return j.default;
@@ -4182,12 +4213,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     }
   }
 
-amera denied — use manual entry", "err");
-      stopScan();
-    }
-  }
-
-  /* ---------- QR render helpers ---------- */
+/* ---------- QR render helpers ---------- */
   function renderQrToImg(text, imgEl) {
     if (!text || !imgEl || typeof qrcode !== "function") return;
     try {
@@ -4731,7 +4757,10 @@ amera denied — use manual entry", "err");
     /* theme */
     function applyTheme(next) {
       document.documentElement.setAttribute("data-crt", next);
-      $("themeLabel").textContent = next.toUpperCase();
+      const lab = $("themeLabel");
+      if (lab) lab.textContent = next.toUpperCase();
+      const tg = $("themeToggle");
+      if (tg) tg.title = next === "amber" ? "Amber CRT (tap for green)" : "Green CRT (tap for amber)";
       const meta = document.querySelector('meta[name="theme-color"]');
       if (meta) {
         const cs = getComputedStyle(document.documentElement);
