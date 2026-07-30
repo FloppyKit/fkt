@@ -1,179 +1,699 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-crt="green">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <meta name="theme-color" content="#001100">
+<meta name="description" content="FKT ICED COLD offline PSBT signer">
 <title>FKT · Offline Signer</title>
 <style>
-:root {
-  --bg: #000000;
-  --fg: #00ff66;
-  --dim: #0a3d1a;
-  --hi: #39ff14;
-  --warn: #ffaa00;
-  --err: #ff4444;
-  --panel: #001a0a;
-  --border: #00aa44;
-  --foot-h: 2.6rem;
-  --head-h: 3.2rem;
-  font-family: "Courier New", Courier, monospace;
+:root, html[data-crt="green"] {
+  --crt-bg: #000;
+  --crt-panel: #001408;
+  --crt-panel-deep: #000c05;
+  --crt-border: #0c5;
+  --crt-fg: #b8ffcc;
+  --crt-hi: #3dff7a;
+  --crt-mid: #6ee89a;
+  --crt-dim: #3a7a52;
+  --crt-muted: #2a5a3c;
+  --crt-warn: #ffb020;
+  --crt-err: #f55;
+  --crt-scan: #002a14;
+  --crt-track: #0a1f12;
+  --crt-knob: #e8ffe8;
+  /* cohesive surfaces (buttons, cells, soft borders) */
+  --crt-surface: #000;
+  --crt-btn-hover: #0a2214;
+  --crt-btn-primary: #0a2818;
+  --crt-btn-primary-hover: #0f3d1d;
+  --crt-border-soft: rgba(0, 204, 85, 0.55);
+  --crt-border-faint: rgba(0, 204, 85, 0.25);
+  --crt-border-mid: rgba(0, 204, 85, 0.35);
+  --crt-focus: rgba(61, 255, 122, 0.35);
+  --crt-warn-bg: #120c00;
+  --crt-drop-over: #002211;
+  --crt-theme-meta: #001100;
 }
-* { box-sizing: border-box; }
+html[data-crt="amber"] {
+  --crt-bg: #000;
+  --crt-panel: #1a1000;
+  --crt-panel-deep: #0e0900;
+  --crt-border: #c90;
+  --crt-fg: #ffe2a0;
+  --crt-hi: #fc4;
+  --crt-mid: #e6b84d;
+  --crt-dim: #8a6a20;
+  --crt-muted: #6a5018;
+  --crt-warn: #ffb020;
+  --crt-err: #f55;
+  --crt-scan: #2a1c00;
+  --crt-track: #1f1608;
+  --crt-knob: #fff6e0;
+  /* amber surfaces — same roles as green, warm tint */
+  --crt-surface: #000;
+  --crt-btn-hover: #2a1c00;
+  --crt-btn-primary: #2a1800;
+  --crt-btn-primary-hover: #3d2400;
+  --crt-border-soft: rgba(204, 153, 0, 0.55);
+  --crt-border-faint: rgba(204, 153, 0, 0.25);
+  --crt-border-mid: rgba(204, 153, 0, 0.35);
+  --crt-focus: rgba(255, 204, 68, 0.35);
+  --crt-warn-bg: #1a1200;
+  --crt-drop-over: #2a1c00;
+  --crt-theme-meta: #1a1000;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
-  margin: 0; padding: 0; background: var(--bg); color: var(--fg);
-  height: 100%; overflow: hidden;
-}
-#app {
   height: 100%;
+  background: var(--crt-bg);
+  color: var(--crt-fg);
+  font-family: "Courier New", Courier, ui-monospace, monospace;
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-text-size-adjust: 100%;
+}
+button, input, textarea { font-family: inherit; }
+button { cursor: pointer; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+.hidden { display: none !important; }
+.ok { color: var(--crt-hi); }
+.err { color: var(--crt-err); }
+.dim { color: var(--crt-dim); }
+.warn { color: var(--crt-warn); }
+
+.crt-shell {
+  min-height: 100%;
   display: flex;
   flex-direction: column;
 }
-/* top banner like TUI */
-.top-banner {
-  flex: 0 0 auto;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-  padding: 0.45rem 0.75rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  min-height: var(--head-h);
-}
-.top-banner h1 {
-  margin: 0; font-size: 0.95rem; letter-spacing: 0.06em; color: var(--hi);
-}
-.top-banner .tag { color: var(--hi); font-size: 0.8rem; }
-/* main scroll area */
-.main {
-  flex: 1 1 auto;
-  overflow: auto;
-  padding: 1rem 0.85rem 1.25rem;
-  max-width: 720px;
+.shell-inner {
   width: 100%;
+  max-width: 42rem;
   margin: 0 auto;
-}
-/* bottom status like TUI footer */
-.footer-bar {
-  flex: 0 0 auto;
-  border-top: 1px solid var(--border);
-  background: #000e06;
-  padding: 0.4rem 0.75rem;
-  font-size: 0.78rem;
+  min-height: 100%;
   display: flex;
+  flex-direction: column;
+}
+.crt-header {
+  display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  flex-wrap: wrap;
-  min-height: var(--foot-h);
+  padding: 0.7rem 0.85rem;
+  border-bottom: 1px solid var(--crt-border);
+  background: var(--crt-panel);
+  flex-shrink: 0;
+}
+.crt-header h1 {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--crt-hi);
+  white-space: nowrap;
+}
+@media (min-width: 480px) {
+  .crt-header h1 { font-size: 1rem; }
+}
+.toggle-wrap {
+  display: flex;
   align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
 }
-.footer-bar .ok { color: var(--hi); }
-.footer-bar .dim { color: var(--dim); }
-.footer-bar span { white-space: nowrap; }
-
-.screen.hidden { display: none !important; }
-.subtitle {
-  text-align: center;
-  color: var(--hi);
+.offline-pill {
   letter-spacing: 0.12em;
-  font-size: 0.85rem;
-  margin: 0.5rem 0 1.25rem;
+  color: var(--crt-hi);
+  border: 1px solid var(--crt-hi);
+  padding: 0.22rem 0.4rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
-.menu-list {
-  list-style: none;
+.offline-pill.warn-online {
+  color: var(--crt-warn);
+  border-color: var(--crt-warn);
+}
+.toggle-label {
+  letter-spacing: 0.1em;
+  color: var(--crt-mid);
+  font-size: 0.62rem;
+  font-weight: 700;
+  min-width: 3rem;
+  text-align: right;
+}
+.toggle {
+  border: 1px solid var(--crt-border);
+  background: var(--crt-track);
+  border-radius: 999px;
+  width: 48px;
+  height: 28px;
   padding: 0;
-  margin: 1.5rem auto;
-  max-width: 22rem;
+  position: relative;
+  flex-shrink: 0;
 }
-.menu-list li { margin: 0.35rem 0; }
-.menu-list button {
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--fg);
-  font-family: inherit;
-  font-size: 1rem;
-  padding: 0.45rem 0.6rem;
-  cursor: pointer;
+.toggle::after {
+  content: "";
+  background: var(--crt-knob);
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  transition: transform 0.16s;
 }
-.menu-list button:hover, .menu-list button:focus {
-  border-color: var(--border);
-  background: #002211;
-  color: var(--hi);
-  outline: none;
-}
-.prompt-line {
-  text-align: center;
-  color: var(--dim);
-  font-size: 0.8rem;
-  margin-top: 1.5rem;
-}
-.menu-status { text-align: center; min-height: 1.4rem; margin-top: 0.75rem; font-size: 0.85rem; }
+html[data-crt="amber"] .toggle::after { transform: translateX(20px); }
 
-button, .btn {
-  background: #003311;
-  color: var(--hi);
-  border: 1px solid var(--border);
-  padding: 0.5rem 0.85rem;
-  font-family: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-  margin: 0.25rem 0.25rem 0.25rem 0;
+.crt-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.85rem;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--crt-bg);
 }
-button:hover { background: #004422; }
-button.primary { background: #005522; }
-button.danger { border-color: var(--err); color: var(--err); }
-button.ghost { background: transparent; color: var(--dim); border-color: var(--dim); }
-button:disabled { opacity: 0.4; cursor: not-allowed; }
-.row { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.6rem; }
 
-label { display: block; font-size: 0.75rem; color: var(--dim); margin: 0.5rem 0 0.2rem; }
-textarea, input[type=text] {
-  width: 100%;
+/* Scan target */
+.scan-target {
+  border: 1px solid var(--crt-border);
   background: #000;
-  color: var(--fg);
-  border: 1px solid var(--border);
-  padding: 0.55rem;
-  font-family: inherit;
-  font-size: 0.85rem;
+  min-height: 210px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
 }
-textarea { min-height: 5.5rem; resize: vertical; }
-.mono { white-space: pre-wrap; word-break: break-all; font-size: 0.78rem; }
-.ok { color: var(--hi); }
-.err { color: var(--err); }
-.dim { color: var(--dim); }
-.warn-inline {
-  border: 1px solid var(--warn);
-  color: var(--warn);
-  padding: 0.5rem 0.65rem;
-  font-size: 0.78rem;
-  margin: 0.75rem 0;
-  background: #1a1200;
+.scan-target.scanning,
+.scan-target.active { border-color: var(--crt-hi); }
+.scan-target.scanning { animation: pulse-border 1.4s ease-in-out infinite; }
+@keyframes pulse-border {
+  0%, 100% { border-color: var(--crt-border); }
+  50% { border-color: var(--crt-hi); }
 }
-
-.scan-box {
-  border: 1px solid var(--border);
-  background: #000;
-  padding: 0.5rem;
-  margin: 0.5rem 0;
+.scan-corners { pointer-events: none; position: absolute; inset: 10px; z-index: 2; }
+.scan-corners .c {
+  position: absolute; width: 18px; height: 18px;
+  border-color: var(--crt-hi); border-style: solid; border-width: 0;
+}
+.scan-corners .tl { top: 0; left: 0; border-top-width: 2px; border-left-width: 2px; }
+.scan-corners .tr { top: 0; right: 0; border-top-width: 2px; border-right-width: 2px; }
+.scan-corners .bl { bottom: 0; left: 0; border-bottom-width: 2px; border-left-width: 2px; }
+.scan-corners .br { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; }
+.scan-camera-body {
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem 1rem 1rem;
+  background: radial-gradient(ellipse at center, rgba(0,42,20,0.55) 0%, #000 70%);
   text-align: center;
+  position: relative;
+  min-height: 200px;
+  width: 100%;
 }
 #scan-video {
   width: 100%;
-  max-height: 280px;
-  background: #001100;
+  max-height: 240px;
   object-fit: cover;
+  background: #001100;
+  display: block;
 }
-.scan-hint { font-size: 0.75rem; color: var(--dim); margin: 0.4rem 0; }
-.drop {
-  border: 2px dashed var(--border);
-  padding: 1.25rem;
+.scan-idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
   text-align: center;
-  color: var(--dim);
+}
+.scan-cam-wrap {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  color: var(--crt-hi);
+  line-height: 0;
+}
+.scan-cam-wrap svg,
+.scan-cam-icon {
+  width: 1.5rem;
+  height: 1.5rem;
+  display: block;
+  color: var(--crt-hi);
+  stroke: currentColor;
+}
+.scan-title {
+  color: var(--crt-hi);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  font-size: 0.875rem;
+  display: block;
+  text-align: center;
+  margin: 0 auto;
+  width: 100%;
+}
+.scan-hint {
+  font-size: 0.75rem;
+  color: var(--crt-mid);
+  max-width: 22rem;
+  line-height: 1.4;
+  text-align: center;
+  margin: 0 auto;
+}
+.scan-status { font-size: 0.75rem; min-height: 1.1rem; margin-top: 0.25rem; }
+
+.manual-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+@media (min-width: 480px) {
+  .manual-row { flex-direction: row; }
+}
+
+/* Buttons */
+.crt-btn {
+  border: 1px solid var(--crt-border);
+  background: var(--crt-surface);
+  color: var(--crt-hi);
+  padding: 0.55rem 0.75rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  transition: background 0.12s, border-color 0.12s;
+  min-height: 2.5rem;
+}
+.crt-btn:hover:not(:disabled) { background: var(--crt-btn-hover); border-color: var(--crt-hi); }
+.crt-btn-primary { background: var(--crt-btn-primary); color: var(--crt-hi); font-weight: 700; }
+.crt-btn-primary:hover:not(:disabled) { background: var(--crt-btn-primary-hover); }
+.crt-btn-ghost { color: var(--crt-fg); background: var(--crt-surface); }
+.crt-btn-danger { border-color: var(--crt-err); color: var(--crt-err); background: var(--crt-surface); }
+.crt-btn-danger:hover:not(:disabled) { background: rgba(255,85,85,0.12); }
+.crt-btn-full { width: 100%; }
+.crt-btn-flex { flex: 1; }
+.row-2 {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.row-2 > .crt-btn { flex: 1; min-width: 0; }
+
+.crt-input, .crt-textarea {
+  width: 100%;
+  color: var(--crt-fg);
+  border: 1px solid var(--crt-border);
+  background: var(--crt-surface);
+  outline: none;
+  padding: 0.65rem 0.7rem;
+  font-size: 0.88rem;
+}
+.crt-input:focus, .crt-textarea:focus {
+  border-color: var(--crt-hi);
+  box-shadow: 0 0 0 1px var(--crt-focus);
+}
+.crt-textarea { resize: vertical; min-height: 6rem; }
+.drop {
+  border: 2px dashed var(--crt-border);
+  background: var(--crt-surface);
+  padding: 1rem;
+  text-align: center;
+  color: var(--crt-dim);
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+.drop.over { border-color: var(--crt-hi); color: var(--crt-hi); background: var(--crt-drop-over); }
+
+/* Tabs */
+.seg-tabs {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--crt-border);
+}
+.seg-tab {
+  letter-spacing: 0.08em;
+  border: none;
+  border-right: 1px solid var(--crt-border);
+  min-height: 52px;
+  color: var(--crt-mid);
+  background: var(--crt-surface);
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.seg-tab:last-child { border-right: none; }
+.seg-tab.loaded { color: var(--crt-fg); }
+.seg-tab.loaded .status-dot { color: var(--crt-hi); }
+.seg-tab.active {
+  background: var(--crt-scan);
+  color: var(--crt-hi);
+}
+.seg-tab.active .status-dot { color: var(--crt-hi); }
+.status-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: transparent;
+  flex-shrink: 0;
+}
+.status-dot.on { background: currentColor; }
+
+.panel {
+  border: 1px solid var(--crt-border);
+  background: var(--crt-panel);
+  padding: 0.85rem 0.9rem;
+  min-height: 12rem;
+}
+.panel-empty {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  min-height: 10rem;
+  color: var(--crt-mid);
+  font-size: 0.88rem;
+  gap: 0.35rem;
+}
+.panel-empty .hint { font-size: 0.75rem; color: var(--crt-dim); max-width: 18rem; }
+
+.section-title {
+  letter-spacing: 0.1em;
+  color: var(--crt-hi);
+  font-size: 0.72rem;
+  font-weight: 700;
+  margin: 0.85rem 0 0.45rem;
+}
+.section-title:first-child { margin-top: 0; }
+
+.meta-line {
+  font-size: 0.82rem;
+  color: var(--crt-fg);
+  margin-bottom: 0.35rem;
+}
+.meta-line .k { color: var(--crt-mid); }
+.fp-mono {
+  font-size: 0.78rem;
+  word-break: break-all;
+  color: var(--crt-hi);
+}
+
+.word-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.35rem;
+  margin: 0.65rem 0;
+}
+@media (max-width: 380px) {
+  .word-grid { grid-template-columns: 1fr 1fr; }
+}
+.word-cell {
+  border: 1px solid var(--crt-border-soft);
+  background: var(--crt-surface);
+  padding: 0.4rem 0.45rem;
+  font-size: 0.78rem;
+  color: var(--crt-fg);
+}
+.word-cell .n {
+  color: var(--crt-mid);
+  margin-right: 0.3rem;
+  font-size: 0.65rem;
+}
+
+.output-row {
+  border: 1px solid var(--crt-border-soft);
+  background: var(--crt-surface);
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.45rem;
+}
+.out-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.out-badge {
+  letter-spacing: 0.1em;
+  border: 1px solid var(--crt-border);
+  color: var(--crt-mid);
+  padding: 0.12rem 0.4rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.out-badge.send { border-color: var(--crt-hi); color: var(--crt-hi); }
+.out-badge.change { border-color: var(--crt-warn); color: var(--crt-warn); }
+.out-amt { font-weight: 700; color: var(--crt-hi); font-size: 0.9rem; }
+.out-addr {
+  font-size: 0.75rem;
+  color: var(--crt-fg);
+  word-break: break-all;
+  letter-spacing: 0.02em;
+}
+.stat-grid {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.65rem 0;
+  font-size: 0.82rem;
+}
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--crt-border-faint);
+  padding: 0.3rem 0;
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-row .lab { color: var(--crt-mid); letter-spacing: 0.06em; font-size: 0.72rem; font-weight: 700; }
+.stat-row .val { color: var(--crt-fg); text-align: right; }
+.stat-row .val.warn { color: var(--crt-warn); }
+.high-fee-warn {
+  border: 1px solid var(--crt-warn);
+  color: var(--crt-warn);
+  background: var(--crt-warn-bg);
+  padding: 0.55rem 0.65rem;
+  font-size: 0.75rem;
+  margin: 0.5rem 0;
+  line-height: 1.4;
+}
+
+.tech-details {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--crt-border-mid);
+  padding-top: 0.55rem;
+}
+.tech-details summary {
+  list-style: none;
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--crt-fg);
+  font-size: 0.8rem;
+}
+.tech-details summary::-webkit-details-marker { display: none; }
+.tech-details summary::before { content: "▸ "; color: var(--crt-mid); }
+.tech-details[open] summary::before { content: "▾ "; }
+.tech-block { margin-top: 0.75rem; }
+.tech-block h4 {
+  letter-spacing: 0.1em;
+  color: var(--crt-mid);
+  font-size: 0.68rem;
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+}
+.tech-block .body {
+  font-size: 0.75rem;
+  color: var(--crt-fg);
+  word-break: break-all;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.tech-io-row {
+  border-bottom: 1px solid var(--crt-border-faint);
+  padding: 0.3rem 0;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+.tech-io-row:last-child { border-bottom: none; }
+
+/* Modal */
+.modal-backdrop {
+  z-index: 40;
+  background: rgba(0,0,0,0.82);
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 1rem;
+  position: fixed;
+  inset: 0;
+}
+@media (min-width: 640px) {
+  .modal-backdrop { align-items: center; }
+}
+.modal-sheet {
+  background: var(--crt-panel);
+  border: 1px solid var(--crt-border);
+  width: min(100%, 34rem);
+  max-height: min(90vh, 42rem);
+  padding: 1rem 1.1rem 1.15rem;
+  overflow: auto;
+}
+.modal-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--crt-hi);
+}
+.modal-sub { font-size: 0.72rem; color: var(--crt-mid); margin-top: 0.25rem; }
+
+/* Keygen overlay — content-sized panel with closed bottom edge */
+.keygen-screen {
+  z-index: 45;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  position: fixed;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.keygen-tui {
+  /* full closed box (not open side rails) */
+  border: 1px solid var(--crt-border);
+  background: var(--crt-panel);
+  width: min(100%, 40rem);
+  height: fit-content;
+  max-height: 100vh;
+  max-height: 100dvh;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.keygen-tui-head {
+  border-bottom: 1px solid var(--crt-border);
+  letter-spacing: 0.08em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--crt-hi);
+  flex-shrink: 0;
+}
+.keygen-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.85rem 1.1rem 1rem;
+}
+.keygen-subtitle {
+  text-align: center;
+  color: var(--crt-hi);
+  letter-spacing: 0.12em;
+  margin: 0.35rem 0 1rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.keygen-line { color: var(--crt-fg); margin: 0.35rem 0; font-size: 0.9rem; }
+.keygen-dim { color: var(--crt-mid); margin: 0.35rem 0; font-size: 0.8rem; }
+.keygen-pre {
+  border: 1px solid var(--crt-border);
+  color: var(--crt-hi);
+  white-space: pre;
+  background: var(--crt-surface);
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.7rem;
+  line-height: 1.35;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.keygen-quantum {
+  color: var(--crt-hi);
+  letter-spacing: 0.06em;
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.keygen-warn {
+  border: 1px solid var(--crt-warn);
+  color: var(--crt-warn);
+  background: var(--crt-warn-bg);
+  margin-bottom: 0.85rem;
+  padding: 0.7rem 0.8rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+.entropy-bar-wrap {
+  border: 1px solid var(--crt-border);
+  background: var(--crt-surface);
+  height: 1.1rem;
+  margin: 0.75rem 0;
+  overflow: hidden;
+}
+.entropy-bar {
+  height: 100%;
+  background: var(--crt-hi);
+  width: 0%;
+  transition: width 0.08s linear;
+}
+.entropy-bar.over { background: linear-gradient(90deg, var(--crt-hi), var(--crt-warn)); }
+.keygen-footer-keys {
+  color: var(--crt-mid);
+  letter-spacing: 0.04em;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.1rem;
+  margin-top: 1rem;
+  font-size: 0.75rem;
+  display: flex;
+}
+.seed-qr-wrap {
+  border: 1px solid var(--crt-border);
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem;
   margin: 0.5rem 0;
 }
-.drop.over { border-color: var(--hi); color: var(--hi); background: #002211; }
+.seed-qr-img {
+  image-rendering: pixelated;
+  width: 188px;
+  height: 188px;
+  display: block;
+}
+.seed-qr-caption {
+  letter-spacing: 0.08em;
+  color: #111;
+  text-align: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
 #qrAscii {
   font-size: 5px;
   line-height: 5px;
@@ -185,164 +705,146 @@ textarea { min-height: 5.5rem; resize: vertical; }
   overflow: auto;
   max-width: 100%;
 }
-.back-row { margin-top: 1.25rem; }
-.panel-note { font-size: 0.78rem; color: var(--dim); margin: 0.4rem 0 0.8rem; }
+.bottom-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.35rem;
+}
+@media (min-width: 420px) {
+  .bottom-actions { flex-direction: row; }
+  .bottom-actions .crt-btn { flex: 1; }
+}
+.toast {
+  font-size: 0.75rem;
+  min-height: 1.1rem;
+  color: var(--crt-mid);
+}
+.signed-panel textarea {
+  min-height: 5rem;
+  font-size: 0.72rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-target.scanning { animation: none; }
+  .toggle::after, .entropy-bar { transition: none; }
+}
+
 </style>
 </head>
 <body>
-<div id="app">
-  <header class="top-banner">
-    <h1>FKT SIGNER v0.2.1</h1>
-    <div class="tag">ICED COLD · PWA</div>
-  </header>
 
-  <main class="main">
-    <video id="scan-video" class="hidden" playsinline muted style="width:100%;max-height:280px;background:#001100;object-fit:cover"></video>
-    <canvas id="scan-canvas" class="hidden"></canvas>
-
-    <!-- MAIN MENU -->
-    <section class="screen" id="screen-menu">
-      <div class="subtitle">MAIN MENU</div>
-      <ul class="menu-list">
-        <li><button type="button" data-goto="load-seed">1. Load seed</button></li>
-        <li><button type="button" data-goto="load-psbt">2. Load PSBT</button></li>
-        <li><button type="button" data-goto="preview">3. Preview transaction</button></li>
-        <li><button type="button" data-goto="sign">4. Sign transaction</button></li>
-        <li><button type="button" data-goto="show-seed">5. Show seed</button></li>
-        <li><button type="button" data-goto="new-wallet">6. Create new wallet</button></li>
-        <li><button type="button" id="btn-exit">0. Exit / clear session</button></li>
-      </ul>
-      <div class="prompt-line">Select option · status on bottom bar</div>
-      <div class="menu-status" id="menu-status"></div>
-      <div class="warn-inline">AIR-GAP recommended. Browser risk ≠ DOS FKTSIGN.EXE. Warm .fkt files are CLI-only — paste words here.</div>
-    </section>
-
-    <!-- 1 LOAD SEED -->
-    <section class="screen hidden" id="screen-load-seed">
-      <div class="subtitle">LOAD SEED</div>
-      <div id="seed-scan-panel">
-        <div class="scan-box" id="seed-scan-box">
-          <p class="scan-hint">📷 Default: scan BIP39 QR (seed words as text). Camera preview appears above.</p>
-        </div>
-        <div class="row">
-          <button type="button" class="ghost" id="btn-seed-to-manual">Can’t scan? Type words instead</button>
-        </div>
+<div class="crt-shell">
+  <div class="shell-inner">
+    <header class="crt-header">
+      <div>
+        <h1>FKT SIGNER · ICED COLD</h1>
       </div>
-      <div id="seed-manual-panel" class="hidden">
-        <label>BIP39 mnemonic (12 / 24)</label>
-        <textarea id="seedIn" placeholder="word1 word2 … word12" autocomplete="off"></textarea>
-        <div class="row">
-          <button type="button" class="primary" id="btnSeedCheck">Validate checksum</button>
-          <button type="button" id="btnSeedVerify">3-word verify</button>
-          <button type="button" class="danger" id="btnWipeSeed">Wipe</button>
-        </div>
-        <div id="seedVerifyBox" class="hidden">
-          <label id="seedQ1"></label><input type="text" id="seedA1" autocomplete="off">
-          <label id="seedQ2"></label><input type="text" id="seedA2" autocomplete="off">
-          <label id="seedQ3"></label><input type="text" id="seedA3" autocomplete="off">
-          <button type="button" id="btnSeedConfirm">Confirm 3 words</button>
-        </div>
-        <div class="row">
-          <button type="button" class="ghost" id="btn-seed-to-scan">← Back to camera scan</button>
-        </div>
+      <div class="toggle-wrap">
+        <span class="offline-pill" id="offlinePill">OFFLINE</span>
+        <span class="toggle-label" id="themeLabel">GREEN</span>
+        <button type="button" class="toggle" id="themeToggle" aria-label="Toggle green or amber theme" title="Toggle green / amber CRT"></button>
       </div>
-      <div id="load-seed-status" class="mono"></div>
-      <div class="back-row"><button type="button" data-goto="menu">← Main menu</button></div>
-    </section>
+    </header>
 
-    <!-- 2 LOAD PSBT -->
-    <section class="screen hidden" id="screen-load-psbt">
-      <div class="subtitle">LOAD PSBT</div>
-      <div id="psbt-scan-panel">
-        <div class="scan-box" id="psbt-scan-box">
-          <p class="scan-hint">📷 Default: scan PSBT Base64 QR. Camera preview appears above.</p>
+    <main class="crt-main">
+      <!-- SCAN ZONE -->
+      <section class="scan-target" id="scanTarget" role="region" aria-label="QR scan target">
+        <div class="scan-corners" aria-hidden="true">
+          <span class="c tl"></span><span class="c tr"></span>
+          <span class="c bl"></span><span class="c br"></span>
         </div>
-        <div class="row">
-          <button type="button" class="ghost" id="btn-psbt-to-manual">Can’t scan? Type / browse file</button>
+        <div class="scan-camera-body">
+          <div id="scanIdle" class="scan-idle">
+            <div class="scan-cam-wrap" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="scan-cam-icon"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"></path><circle cx="12" cy="13" r="3"></circle></svg></div>
+            <div class="scan-title"><span>TAP TO SCAN QR</span></div>
+            <p class="scan-hint">Unified smart scan. Auto-detects seed vs PSBT and slots correctly.</p>
+          </div>
+          <div id="scanVideoHost"></div>
+          <video id="scan-video" class="hidden" playsinline muted></video>
+          <canvas id="scan-canvas" class="hidden"></canvas>
+          <button type="button" class="crt-btn crt-btn-ghost hidden" id="btnStopScan" style="margin-top:0.5rem">STOP SCAN</button>
         </div>
+      </section>
+      <div class="scan-status" id="scanStatusLine"></div>
+
+      <div class="manual-row">
+        <button type="button" class="crt-btn crt-btn-primary crt-btn-flex" id="btnManualSeed">ENTER SEED MANUALLY</button>
+        <button type="button" class="crt-btn crt-btn-primary crt-btn-flex" id="btnManualPsbt">ENTER PSBT MANUALLY</button>
       </div>
-      <div id="psbt-manual-panel" class="hidden">
-        <div class="drop" id="dropZone">Drag &amp; drop <b>.psbt</b> here</div>
-        <input type="file" id="fileIn" accept=".psbt,.txt,*/*">
-        <label>Or paste Base64 (cHNidP…)</label>
-        <textarea id="psbtIn" placeholder="cHNidP8B..."></textarea>
-        <div class="row">
-          <button type="button" class="primary" id="btnParse">Parse PSBT</button>
+
+      <!-- DUAL TABS -->
+      <div class="seg-tabs" role="tablist">
+        <button type="button" class="seg-tab" id="tabSeed" role="tab" aria-selected="false">
+          <span class="status-dot" id="dotSeed"></span>
+          <span class="seg-tab-label">SEED</span>
+        </button>
+        <button type="button" class="seg-tab active" id="tabPsbt" role="tab" aria-selected="true">
+          <span class="status-dot" id="dotPsbt"></span>
+          <span class="seg-tab-label">PSBT</span>
+        </button>
+      </div>
+
+      <div class="panel" id="panelSeed" role="tabpanel"></div>
+      <div class="panel" id="panelPsbt" role="tabpanel"></div>
+
+      <!-- SIGNED OUTPUT (appears after sign) -->
+      <section class="panel signed-panel hidden" id="signedPanel">
+        <div class="section-title">SIGNED OUTPUT</div>
+        <label class="dim" style="font-size:0.72rem;letter-spacing:0.08em">BASE64</label>
+        <textarea id="psbtOut" class="crt-textarea" readonly></textarea>
+        <div class="row-2" style="margin-top:0.5rem">
+          <button type="button" class="crt-btn crt-btn-ghost" id="btnCopy">COPY BASE64</button>
+          <button type="button" class="crt-btn crt-btn-ghost" id="btnDl">DOWNLOAD .PSBT</button>
+          <button type="button" class="crt-btn crt-btn-ghost" id="btnQr">ASCII QR</button>
         </div>
-        <div class="row">
-          <button type="button" class="ghost" id="btn-psbt-to-scan">← Back to camera scan</button>
-        </div>
+        <div id="qrWrap" class="hidden" style="margin-top:0.5rem;overflow:auto"><div id="qrAscii"></div></div>
+      </section>
+
+      <div class="toast" id="statusMsg"></div>
+
+      <div class="bottom-actions">
+        <button type="button" class="crt-btn crt-btn-primary" id="btnKeygen">+ KEYGEN · NEW SEED</button>
+        <button type="button" class="crt-btn crt-btn-ghost" id="btnClearSession">CLEAR SESSION</button>
       </div>
-      <div id="load-psbt-status" class="mono"></div>
-      <div class="back-row"><button type="button" data-goto="menu">← Main menu</button></div>
-    </section>
-
-    <!-- 3 PREVIEW -->
-    <section class="screen hidden" id="screen-preview">
-      <div class="subtitle">PREVIEW TRANSACTION</div>
-      <p class="panel-note">Read-only · no seed required</p>
-      <div id="previewOut" class="mono">No PSBT loaded.</div>
-      <div class="back-row"><button type="button" data-goto="menu">← Main menu</button></div>
-    </section>
-
-    <!-- 4 SIGN -->
-    <section class="screen hidden" id="screen-sign">
-      <div class="subtitle">SIGN TRANSACTION</div>
-      <p class="panel-note">P2WPKH + P2TR keypath · type CONFIRM to authorize</p>
-      <label>CONFIRM&gt;</label>
-      <input type="text" id="sign-confirm" placeholder="CONFIRM" autocomplete="off">
-      <div class="row">
-        <button type="button" class="primary" id="btnSign">Sign PSBT</button>
-      </div>
-      <div id="sign-status" class="mono"></div>
-      <div class="back-row"><button type="button" data-goto="menu">← Main menu</button></div>
-    </section>
-
-    <!-- 5 SHOW SEED -->
-    <section class="screen hidden" id="screen-show-seed">
-      <div class="subtitle">SHOW SEED</div>
-      <p class="panel-note">⚠️ Keep screen private</p>
-      <div id="show-seed-out" class="mono">(seed not loaded)</div>
-      <div class="back-row"><button type="button" data-goto="menu">← Main menu</button></div>
-    </section>
-
-    <!-- 6 NEW WALLET -->
-    <section class="screen hidden" id="screen-new-wallet">
-      <div class="subtitle">CREATE NEW WALLET</div>
-      <label>Word count</label>
-      <div class="row">
-        <button type="button" id="btn-new-12">12 words</button>
-        <button type="button" id="btn-new-24">24 words</button>
-      </div>
-      <input type="hidden" id="new-word-count" value="12">
-      <div class="row"><button type="button" class="primary" id="btn-new-wallet">Generate</button></div>
-      <div id="new-wallet-status" class="mono"></div>
-      <pre id="new-seed-out" class="mono"></pre>
-      <div class="back-row"><button type="button" data-goto="menu">← Main menu</button></div>
-    </section>
-
-    <!-- OUTPUT after sign -->
-    <section class="screen hidden" id="screen-output">
-      <div class="subtitle">SIGNED OUTPUT</div>
-      <label>Base64</label>
-      <textarea id="psbtOut" readonly></textarea>
-      <div class="row">
-        <button type="button" id="btnCopy">Copy Base64</button>
-        <button type="button" id="btnDl">Download .psbt</button>
-        <button type="button" id="btnQr">ASCII QR</button>
-      </div>
-      <div id="out-status" class="mono"></div>
-      <div id="qrWrap" class="hidden"><div id="qrAscii"></div></div>
-      <div class="back-row"><button type="button" data-goto="menu">← Main menu</button></div>
-    </section>
-
-  </main>
-
-  <footer class="footer-bar">
-    <span><span id="foot-seed-emoji">⬜</span> <span id="foot-seed" class="dim">Seed ○ not loaded</span></span>
-    <span><span id="foot-psbt-emoji">⬜</span> <span id="foot-psbt" class="dim">PSBT ○ not loaded</span></span>
-  </footer>
+    </main>
+  </div>
 </div>
+
+<!-- Manual entry modal -->
+<div class="modal-backdrop hidden" id="manualModal" role="dialog" aria-modal="true">
+  <div class="modal-sheet">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.75rem;margin-bottom:0.75rem">
+      <div>
+        <div class="modal-title" id="manualTitle">ENTER</div>
+        <p class="modal-sub" id="manualSub"></p>
+      </div>
+      <button type="button" class="crt-btn crt-btn-ghost" id="btnManualCancel">CLOSE</button>
+    </div>
+    <div id="manualSeedBlock" class="hidden">
+      <textarea id="manualSeedIn" class="crt-textarea" placeholder="word1 word2 … word12" autocomplete="off"></textarea>
+    </div>
+    <div id="manualPsbtBlock" class="hidden">
+      <div class="drop" id="dropZone">Drag &amp; drop <b>.psbt</b> here</div>
+      <input type="file" id="fileIn" accept=".psbt,.txt,*/*" style="margin-bottom:0.5rem;color:var(--crt-mid);font-size:0.75rem">
+      <textarea id="manualPsbtIn" class="crt-textarea" placeholder="cHNidP8B..."></textarea>
+    </div>
+    <p id="manualErr" style="margin:0.5rem 0;font-size:0.8rem;min-height:1.1rem"></p>
+    <button type="button" class="crt-btn crt-btn-primary crt-btn-full" id="btnManualSubmit">LOAD</button>
+  </div>
+</div>
+
+<!-- Keygen full-screen ritual -->
+<div class="keygen-screen hidden" id="keygenScreen">
+  <div class="keygen-tui">
+    <div class="keygen-tui-head">
+      <span>ICED COLD · KEYGEN</span>
+      <button type="button" class="crt-btn crt-btn-ghost" id="btnKeygenClose" style="padding:0.3rem 0.55rem;min-height:auto;font-size:0.72rem">ESC CLOSE</button>
+    </div>
+    <div class="keygen-body" id="keygenBody"></div>
+  </div>
+</div>
+
 <script>
 /**
  * Minified by jsDelivr using Terser v5.37.0.
@@ -2429,7 +2931,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
 
 </script>
 <script>
-/* FKT PWA — TUI-shaped shell: main menu + status footer + scan-first load */
+/* FKT PWA — Phase 0 dashboard shell · real offline crypto (no CDN) */
 (function () {
   "use strict";
 
@@ -2441,67 +2943,45 @@ globalThis.FKT_WORDLIST = {wordlist: e};
   /* ---------- session state ---------- */
   let psbtBytes = null;
   let psbtMeta = null;
+  let psbtReview = null;
   let seedOk = false;
   let seedWords = null;
   let seedBytes = null;
+  let seedFingerprint = null;
   let signedBytes = null;
-  let verifyIdx = [];
-  let currentScreen = "menu";
-  let psbtLoadMode = "scan"; /* scan | manual */
-  let seedLoadMode = "scan";
+  let lowerView = "psbt"; /* seed | psbt */
+  let seedQrVisible = false;
+  let keygenQrVisible = false;
 
   /* camera / scan */
   let videoStream = null;
   let scanTimer = null;
-  let scanTarget = null; /* 'psbt' | 'seed' */
+  let scanning = false;
+
+  /* keygen ritual */
+  let keygenPhase = "closed"; /* closed | choose | entropy | reveal */
+  let keygenWordCount = 12;
+  let keygenPct = 0;
+  let keygenRolls = 0;
+  let keygenLastRoll = 0;
+  let keygenSpin = 0;
+  let keygenRollTimes = [];
+  let keygenWords = null;
+  let keygenEntropyPool = [];
 
   const $ = (id) => document.getElementById(id);
+  const esc = (s) =>
+    String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
 
-  function setScreen(name) {
-    currentScreen = name;
-    document.querySelectorAll(".screen").forEach((el) => {
-      el.classList.toggle("hidden", el.id !== "screen-" + name);
-    });
-    stopScan();
-    updateFooter();
-    if (name === "load-psbt") {
-      psbtLoadMode = "scan";
-      showPsbtMode();
-      startScan("psbt");
-    }
-    if (name === "load-seed") {
-      seedLoadMode = "scan";
-      showSeedMode();
-      startScan("seed");
-    }
-    if (name === "menu") {
-      $("menu-status").textContent = "";
-    }
-  }
-
-  function seedLabel() {
-    if (seedOk && seedWords)
-      return "● loaded (" + seedWords.length + "w)";
-    return "○ not loaded";
-  }
-  function psbtLabel() {
-    if (psbtMeta) return "● loaded";
-    return "○ not loaded";
-  }
-  function seedEmoji() {
-    return seedOk ? "✅" : "⬜";
-  }
-  function psbtEmoji() {
-    return psbtMeta ? "✅" : "⬜";
-  }
-
-  function updateFooter() {
-    $("foot-seed").textContent = "Seed " + seedLabel();
-    $("foot-psbt").textContent = "PSBT " + psbtLabel();
-    $("foot-seed-emoji").textContent = seedEmoji();
-    $("foot-psbt-emoji").textContent = psbtEmoji();
-    $("foot-seed").classList.toggle("ok", !!seedOk);
-    $("foot-psbt").classList.toggle("ok", !!psbtMeta);
+  function setStatus(msg, cls) {
+    const el = $("statusMsg");
+    if (!el) return;
+    el.className = "toast" + (cls ? " " + cls : "");
+    el.textContent = msg || "";
   }
 
   /* ---------- bytes helpers ---------- */
@@ -2516,6 +2996,11 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     let s = "";
     for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
     return btoa(s);
+  }
+  function bytesToHex(u8) {
+    return Array.from(u8)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
   }
   function concat(arrs) {
     let n = 0;
@@ -2570,6 +3055,11 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       (hi >> 16) & 0xff,
       (hi >> 24) & 0xff,
     ]);
+  }
+  function readLe64(v, off) {
+    const lo = v[off] | (v[off + 1] << 8) | (v[off + 2] << 16) | (v[off + 3] << 24);
+    const hi = v[off + 4] | (v[off + 5] << 8) | (v[off + 6] << 16) | (v[off + 7] << 24);
+    return hi * 0x100000000 + (lo >>> 0);
   }
 
   function sha256pure(bytes) {
@@ -2709,22 +3199,20 @@ globalThis.FKT_WORDLIST = {wordlist: e};
         bl = h1,
         cl = h2,
         dl = h3,
-        el = h4,
-        ar = h0,
+        el = h4;
+      let ar = h0,
         br = h1,
         cr = h2,
         dr = h3,
         er = h4;
       for (let j = 0; j < 80; j++) {
-        let t =
-          (rotl((al + f(j, bl, cl, dl) + X[r1[j]] + K1(j)) >>> 0, s1[j]) + el) >>> 0;
+        let t = (rotl((al + f(j, bl, cl, dl) + X[r1[j]] + K1(j)) >>> 0, s1[j]) + el) >>> 0;
         al = el;
         el = dl;
         dl = rotl(cl, 10);
         cl = bl;
         bl = t;
-        t =
-          (rotl((ar + f(79 - j, br, cr, dr) + X[r2[j]] + K2(j)) >>> 0, s2[j]) + er) >>> 0;
+        t = (rotl((ar + f(79 - j, br, cr, dr) + X[r2[j]] + K2(j)) >>> 0, s2[j]) + er) >>> 0;
         ar = er;
         er = dr;
         dr = rotl(cr, 10);
@@ -2748,6 +3236,107 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     return out;
   }
   const hash160 = (p) => ripemd160pure(sha256pure(p));
+
+  /* minimal bech32 / bech32m for address display */
+  const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+  function bech32Polymod(values) {
+    const GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+    let chk = 1;
+    for (let p = 0; p < values.length; ++p) {
+      const top = chk >> 25;
+      chk = ((chk & 0x1ffffff) << 5) ^ values[p];
+      for (let i = 0; i < 5; i++) if ((top >> i) & 1) chk ^= GEN[i];
+    }
+    return chk;
+  }
+  function bech32HrpExpand(hrp) {
+    const ret = [];
+    for (let i = 0; i < hrp.length; ++i) ret.push(hrp.charCodeAt(i) >> 5);
+    ret.push(0);
+    for (let i = 0; i < hrp.length; ++i) ret.push(hrp.charCodeAt(i) & 31);
+    return ret;
+  }
+  function bech32CreateChecksum(hrp, data, spec) {
+    const values = bech32HrpExpand(hrp).concat(data).concat([0, 0, 0, 0, 0, 0]);
+    const mod = bech32Polymod(values) ^ (spec === "bech32m" ? 0x2bc830a3 : 1);
+    const ret = [];
+    for (let p = 0; p < 6; ++p) ret.push((mod >> (5 * (5 - p))) & 31);
+    return ret;
+  }
+  function convertBits(data, from, to, pad) {
+    let acc = 0,
+      bits = 0;
+    const ret = [];
+    const maxv = (1 << to) - 1;
+    for (let i = 0; i < data.length; i++) {
+      acc = (acc << from) | data[i];
+      bits += from;
+      while (bits >= to) {
+        bits -= to;
+        ret.push((acc >> bits) & maxv);
+      }
+    }
+    if (pad) {
+      if (bits > 0) ret.push((acc << (to - bits)) & maxv);
+    } else if (bits >= from || ((acc << (to - bits)) & maxv)) {
+      return null;
+    }
+    return ret;
+  }
+  function bech32Encode(hrp, witver, program) {
+    const spec = witver === 0 ? "bech32" : "bech32m";
+    const data = [witver].concat(convertBits(Array.from(program), 8, 5, true));
+    const checksum = bech32CreateChecksum(hrp, data, spec);
+    return hrp + "1" + data.concat(checksum).map((d) => BECH32_CHARSET[d]).join("");
+  }
+
+  function scriptType(spk) {
+    if (spk.length === 22 && spk[0] === 0 && spk[1] === 0x14) return "P2WPKH";
+    if (spk.length === 34 && spk[0] === 0 && spk[1] === 0x20) return "P2WSH";
+    if (spk.length === 34 && spk[0] === 0x51 && spk[1] === 0x20) return "P2TR";
+    if (spk.length === 25 && spk[0] === 0x76 && spk[1] === 0xa9) return "P2PKH";
+    if (spk.length === 23 && spk[0] === 0xa9) return "P2SH";
+    return "OTHER";
+  }
+
+  function addressFromScript(spk, networkHint) {
+    /* networkHint: 'main' | 'test' | null — default testnet-friendly display with both if ambiguous */
+    const hrpMain = "bc";
+    const hrpTest = "tb";
+    try {
+      if (spk.length === 22 && spk[0] === 0 && spk[1] === 0x14) {
+        const prog = spk.slice(2);
+        if (networkHint === "main") return bech32Encode(hrpMain, 0, prog);
+        if (networkHint === "test") return bech32Encode(hrpTest, 0, prog);
+        return bech32Encode(hrpTest, 0, prog); /* ALPHA/testnet default */
+      }
+      if (spk.length === 34 && spk[0] === 0 && spk[1] === 0x20) {
+        const prog = spk.slice(2);
+        return bech32Encode(networkHint === "main" ? hrpMain : hrpTest, 0, prog);
+      }
+      if (spk.length === 34 && spk[0] === 0x51 && spk[1] === 0x20) {
+        const prog = spk.slice(2);
+        return bech32Encode(networkHint === "main" ? hrpMain : hrpTest, 1, prog);
+      }
+    } catch (e) {
+      /* fall through */
+    }
+    return bytesToHex(spk).slice(0, 40) + "…";
+  }
+
+  function truncateAddr(addr) {
+    if (!addr || addr.length < 16) return addr || "";
+    /* mobile-first: first5…last5; wider screens still use this in CSS can show fuller via full attr */
+    return addr.slice(0, 5) + "…" + addr.slice(-5);
+  }
+
+  function formatBtc(sats) {
+    const n = sats / 1e8;
+    return n.toFixed(8).replace(/\.?0+$/, (m) => (m.includes(".") ? m.replace(/0+$/, "").replace(/\.$/, "") : m)) + " BTC";
+  }
+  function formatSats(sats) {
+    return Number(sats).toLocaleString("en-US") + " sats";
+  }
 
   function readMap(buf, pos) {
     const map = [];
@@ -2779,7 +3368,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       let ss;
       [ss, p] = readVarInt(tx, p);
       p += ss;
-      const seq = tx[p] | (tx[p + 1] << 8) | (tx[p + 2] << 16) | (tx[p + 3] << 24);
+      const seq = (tx[p] | (tx[p + 1] << 8) | (tx[p + 2] << 16) | (tx[p + 3] << 24)) >>> 0;
       p += 4;
       inputs.push({ txid, vout, seq });
     }
@@ -2787,9 +3376,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     [nOut, p] = readVarInt(tx, p);
     const outputs = [];
     for (let i = 0; i < nOut; i++) {
-      const lo = tx[p] | (tx[p + 1] << 8) | (tx[p + 2] << 16) | (tx[p + 3] << 24);
-      const hi = tx[p + 4] | (tx[p + 5] << 8) | (tx[p + 6] << 16) | (tx[p + 7] << 24);
-      const amt = hi * 0x100000000 + (lo >>> 0);
+      const amt = readLe64(tx, p);
       p += 8;
       let spkLen;
       [spkLen, p] = readVarInt(tx, p);
@@ -2797,14 +3384,8 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       p += spkLen;
       outputs.push({ amount: amt, script });
     }
-    const locktime = tx[p] | (tx[p + 1] << 8) | (tx[p + 2] << 16) | (tx[p + 3] << 24);
-    return { ver, inputs, outputs, locktime };
-  }
-  function scriptType(spk) {
-    if (spk.length === 22 && spk[0] === 0 && spk[1] === 0x14) return "P2WPKH";
-    if (spk.length === 34 && spk[0] === 0 && spk[1] === 0x20) return "P2WSH";
-    if (spk.length === 34 && spk[0] === 0x51 && spk[1] === 0x20) return "P2TR";
-    return "OTHER";
+    const locktime = (tx[p] | (tx[p + 1] << 8) | (tx[p + 2] << 16) | (tx[p + 3] << 24)) >>> 0;
+    return { ver, inputs, outputs, locktime, raw: tx };
   }
   function parsePsbt(bytes) {
     if (
@@ -2834,17 +3415,17 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       [m, pos] = readMap(bytes, pos);
       outputMaps.push(m);
     }
-    return { gmap, tx, inputMaps, outputMaps };
+    return { gmap, tx, inputMaps, outputMaps, rawBytes: bytes };
   }
   function pathFromDeriv(val) {
-    if (val.length < 4) return null;
+    if (!val || val.length < 4) return null;
     const idxs = [];
     for (let i = 4; i + 4 <= val.length; i += 4)
       idxs.push((val[i] | (val[i + 1] << 8) | (val[i + 2] << 16) | (val[i + 3] << 24)) >>> 0);
     return idxs;
   }
   function formatPath(idxs) {
-    if (!idxs) return "(no path)";
+    if (!idxs || !idxs.length) return null;
     return (
       "m/" +
       idxs
@@ -2856,89 +3437,213 @@ globalThis.FKT_WORDLIST = {wordlist: e};
         .join("/")
     );
   }
+  function isChangePath(idxs) {
+    if (!idxs || idxs.length < 2) return false;
+    /* BIP84/86: m/purpose'/coin'/account'/change/index — change is second-to-last */
+    const change = idxs[idxs.length - 2];
+    const v = change >= 0x80000000 ? change - 0x80000000 : change;
+    return v === 1;
+  }
+  function extractWitnessUtxo(imap) {
+    const w = imap.find((e) => e.type === 1);
+    if (!w) return null;
+    const v = w.val;
+    if (v.length < 9) return null;
+    const amt = readLe64(v, 0);
+    let spkLen = v[8],
+      off = 9;
+    if (spkLen === 0xfd) {
+      spkLen = v[9] | (v[10] << 8);
+      off = 11;
+    }
+    const script = v.slice(off, off + spkLen);
+    return { amount: amt, script };
+  }
+  function extractInputPath(imap) {
+    const bip = imap.find((e) => e.type === 6);
+    if (bip) return pathFromDeriv(bip.val);
+    const tapBip = imap.find((e) => e.type === 0x16);
+    if (tapBip) {
+      const val = tapBip.val;
+      let nh = val[0];
+      if (nh >= 0xfd) return null;
+      return pathFromDeriv(val.slice(1 + nh * 32));
+    }
+    return null;
+  }
+  function extractOutputPath(omap) {
+    const bip = omap.find((e) => e.type === 2);
+    if (bip) return pathFromDeriv(bip.val);
+    const tap = omap.find((e) => e.type === 0x07);
+    if (tap) {
+      const val = tap.val;
+      let nh = val[0];
+      if (nh >= 0xfd) return null;
+      return pathFromDeriv(val.slice(1 + nh * 32));
+    }
+    return null;
+  }
+
+  function estimateVsize(tx, inputMaps) {
+    /* rough: base + per-input witness weight */
+    let weight = 0;
+    /* non-witness: version(4)+vin_count+vout_count+locktime(4) + outs + outs scripts + ins outpoints */
+    weight += 4 * 4; /* ver+lock roughly in bytes *4 */
+    weight += 4; /* marker/flag accounted loosely */
+    const nIn = tx.inputs.length;
+    const nOut = tx.outputs.length;
+    weight += 4 * (1 + nIn * 41); /* outpoint+seq approx */
+    let outBytes = 1;
+    tx.outputs.forEach((o) => {
+      outBytes += 8 + 1 + o.script.length;
+    });
+    weight += 4 * outBytes;
+    for (let i = 0; i < nIn; i++) {
+      const utxo = extractWitnessUtxo(inputMaps[i] || []);
+      const st = utxo ? scriptType(utxo.script) : "P2WPKH";
+      if (st === "P2TR") weight += 66; /* ~1 witness item * 64 + overhead */
+      else weight += 108; /* p2wpkh ~27 vB *4 */
+    }
+    return Math.ceil(weight / 4);
+  }
+
+  function buildReview(meta) {
+    const tx = meta.tx;
+    const utxRaw = meta.gmap.find((e) => e.type === 0).val;
+    const txidBytes = doubleSha256(utxRaw);
+    /* display txid big-endian hex (reverse) */
+    const txid = bytesToHex(txidBytes.slice().reverse());
+    const fp = bytesToHex(sha256pure(meta.rawBytes)).slice(0, 16);
+
+    let inSum = 0,
+      outSum = 0,
+      haveAllIn = true;
+    const inputsDetail = [];
+    const rbf = tx.inputs.some((inp) => inp.seq < 0xfffffffe);
+
+    for (let i = 0; i < tx.inputs.length; i++) {
+      const imap = meta.inputMaps[i] || [];
+      const utxo = extractWitnessUtxo(imap);
+      const pathIdxs = extractInputPath(imap);
+      const path = formatPath(pathIdxs);
+      let amt = null,
+        st = "?",
+        addr = null;
+      if (utxo) {
+        amt = utxo.amount;
+        inSum += amt;
+        st = scriptType(utxo.script);
+        addr = addressFromScript(utxo.script, "test");
+      } else haveAllIn = false;
+      const inpRbf = tx.inputs[i].seq < 0xfffffffe;
+      inputsDetail.push({
+        index: i,
+        amountSats: amt,
+        scriptType: st,
+        path: path,
+        rbf: inpRbf,
+        address: addr,
+      });
+    }
+
+    const outputsDetail = [];
+    let sendSum = 0;
+    for (let i = 0; i < tx.outputs.length; i++) {
+      const o = tx.outputs[i];
+      outSum += o.amount;
+      const omap = meta.outputMaps[i] || [];
+      const pathIdxs = extractOutputPath(omap);
+      const path = formatPath(pathIdxs);
+      const change = isChangePath(pathIdxs) || omap.some((e) => e.type === 2 || e.type === 0x07);
+      /* if only one out with path change=1, or last of 2 with derivation, treat as change */
+      let isChange = false;
+      if (pathIdxs && isChangePath(pathIdxs)) isChange = true;
+      else if (path && /\/1\/\d+$/.test(path)) isChange = true;
+      if (!isChange && pathIdxs) {
+        /* any output bip32 path suggests wallet-owned; if change index 1 */
+        isChange = isChangePath(pathIdxs);
+      }
+      const st = scriptType(o.script);
+      const addr = addressFromScript(o.script, "test");
+      if (!isChange) sendSum += o.amount;
+      outputsDetail.push({
+        index: i,
+        amount: o.amount,
+        amountBtc: formatBtc(o.amount),
+        scriptType: st,
+        program: bytesToHex(o.script),
+        address: addr,
+        addressShort: truncateAddr(addr),
+        isChange: isChange,
+        path: path,
+      });
+    }
+    /* heuristic: if no path-marked change and 2 outs, larger may be send — leave as-is */
+    if (!outputsDetail.some((o) => o.isChange) && outputsDetail.length === 2) {
+      /* prefer path; if none, mark none as change (safer) */
+    }
+
+    const feeSats = haveAllIn ? inSum - outSum : null;
+    const estVsize = estimateVsize(tx, meta.inputMaps);
+    const feeRate =
+      feeSats != null && estVsize > 0 ? (feeSats / estVsize).toFixed(1) + " sat/vB" : "?";
+    const highFee =
+      feeSats != null && sendSum > 0 && feeSats / sendSum >= 0.05;
+
+    return {
+      txid,
+      fingerprint: fp,
+      psbtVersion: 0,
+      txVersion: tx.ver,
+      nLockTime: tx.locktime,
+      feeSats,
+      fee: feeSats != null ? formatSats(feeSats) : "?",
+      feeRate,
+      rbf,
+      inputCount: tx.inputs.length,
+      outputCount: tx.outputs.length,
+      estVsize,
+      inputsDetail,
+      outputsDetail,
+      highFee,
+      rawHead: bytesToB64(meta.rawBytes).slice(0, 56) + "…",
+      haveAllIn,
+    };
+  }
+
+  function computeSeedFingerprint() {
+    if (!seedBytes) return null;
+    try {
+      const master = HDKey.fromMasterSeed(seedBytes);
+      const pub = master.publicKey;
+      const h = hash160(pub);
+      return bytesToHex(h.slice(0, 4));
+    } catch (e) {
+      return null;
+    }
+  }
 
   function loadPsbtFromBytes(bytes) {
     psbtBytes = bytes;
     psbtMeta = parsePsbt(bytes);
+    psbtReview = buildReview(psbtMeta);
     signedBytes = null;
-    $("psbtOut").value = "";
-    $("load-psbt-status").innerHTML =
-      '<span class="ok">✅ PSBT loaded · ' + bytes.length + " bytes</span>";
-    updateFooter();
-    renderPreview();
-    flashMenu("PSBT loaded ✅");
+    if ($("psbtOut")) $("psbtOut").value = "";
+    $("signedPanel").classList.add("hidden");
+    lowerView = "psbt";
+    setStatus("PSBT loaded · " + bytes.length + " bytes", "ok");
+    renderAll();
   }
 
-  function renderPreview() {
-    const el = $("previewOut");
-    if (!psbtMeta) {
-      el.innerHTML = '<span class="dim">No PSBT loaded. Use menu 2.</span>';
-      return;
-    }
-    const m = psbtMeta;
-    const tx = m.tx;
-    let html = "",
-      inSum = 0,
-      outSum = 0,
-      haveAll = true;
-    html +=
-      "<div>v" +
-      tx.ver +
-      " lock " +
-      tx.locktime +
-      " · " +
-      tx.inputs.length +
-      " in / " +
-      tx.outputs.length +
-      " out</div>";
-    m.inputMaps.forEach((imap, i) => {
-      const w = imap.find((e) => e.type === 1);
-      const bip = imap.find((e) => e.type === 6);
-      const tap = imap.find((e) => e.type === 0x17);
-      const prop = imap.filter((e) => e.type === 0xfc);
-      let amt = null,
-        st = "?";
-      if (w) {
-        const v = w.val;
-        const lo = v[0] | (v[1] << 8) | (v[2] << 16) | (v[3] << 24);
-        const hi = v[4] | (v[5] << 8) | (v[6] << 16) | (v[7] << 24);
-        amt = hi * 0x100000000 + (lo >>> 0);
-        inSum += amt;
-        let spkLen = v[8],
-          off = 9;
-        if (spkLen === 0xfd) {
-          spkLen = v[9] | (v[10] << 8);
-          off = 11;
-        }
-        st = scriptType(v.slice(off, off + spkLen));
-      } else haveAll = false;
-      const path = bip
-        ? formatPath(pathFromDeriv(bip.val))
-        : imap.find((e) => e.type === 0x16)
-          ? "(tap path)"
-          : null;
-      html +=
-        "<div>IN[" +
-        i +
-        "] " +
-        (amt != null ? amt + " sats" : "?") +
-        " " +
-        st +
-        (tap ? " tap" : "") +
-        " " +
-        (path || "") +
-        (prop.length ? " 0xFC×" + prop.length : "") +
-        "</div>";
-    });
-    tx.outputs.forEach((o, i) => {
-      outSum += o.amount;
-      html +=
-        "<div>OUT[" + i + "] " + o.amount + " sats " + scriptType(o.script) + "</div>";
-    });
-    if (haveAll) html += '<div class="ok">fee ≈ ' + (inSum - outSum) + " sats</div>";
-    const gp = m.gmap.filter((e) => e.type === 0xfc);
-    if (gp.length) html += "<div>global 0xFC ×" + gp.length + "</div>";
-    el.innerHTML = html;
+  function wipePsbt(silent) {
+    psbtBytes = null;
+    psbtMeta = null;
+    psbtReview = null;
+    signedBytes = null;
+    if ($("psbtOut")) $("psbtOut").value = "";
+    $("signedPanel").classList.add("hidden");
+    if (!silent) setStatus("PSBT WIPED", "ok");
+    renderAll();
   }
 
   /* ---------- seed ---------- */
@@ -2946,72 +3651,31 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     m = m.trim().toLowerCase().replace(/\s+/g, " ");
     seedOk = false;
     seedWords = null;
+    seedFingerprint = null;
     if (seedBytes) seedBytes.fill(0);
     seedBytes = null;
     if (!bip39.validateMnemonic(m, wordlist)) throw new Error("Invalid BIP39");
     seedWords = m.split(" ");
     seedBytes = bip39.mnemonicToSeedSync(m, "");
     seedOk = true;
-    updateFooter();
-    flashMenu("Seed loaded ✅ (" + seedWords.length + " words)");
+    seedFingerprint = computeSeedFingerprint();
+    seedQrVisible = false;
+    setStatus("Seed loaded · " + seedWords.length + " words · fp " + (seedFingerprint || "?"), "ok");
     return true;
   }
 
-  function validateSeedUI() {
-    try {
-      validateSeedFromText($("seedIn").value);
-      $("load-seed-status").innerHTML =
-        '<span class="ok">✅ Checksum OK · ' + seedWords.length + " words</span>";
-      return true;
-    } catch (e) {
-      $("load-seed-status").innerHTML = '<span class="err">❌ ' + e.message + "</span>";
-      updateFooter();
-      return false;
-    }
-  }
-
-  function startVerify() {
-    if (!seedOk && !validateSeedUI()) return;
-    if (!seedWords) return;
-    const idx = new Set();
-    while (idx.size < 3) idx.add(Math.floor(Math.random() * seedWords.length));
-    verifyIdx = [...idx];
-    verifyIdx.forEach((ix, i) => {
-      $("seedQ" + (i + 1)).textContent = "Re-type word #" + (ix + 1) + ":";
-      $("seedA" + (i + 1)).value = "";
-    });
-    $("seedVerifyBox").classList.remove("hidden");
-    $("load-seed-status").textContent = "Enter the 3 challenge words.";
-  }
-
-  function confirmVerify() {
-    for (let i = 0; i < 3; i++) {
-      if ($("seedA" + (i + 1)).value.trim().toLowerCase() !== seedWords[verifyIdx[i]]) {
-        $("load-seed-status").innerHTML = '<span class="err">❌ Mismatch — wiped</span>';
-        wipeSeed();
-        return;
-      }
-    }
-    seedOk = true;
-    updateFooter();
-    $("load-seed-status").innerHTML = '<span class="ok">✅ 3-word verify OK</span>';
-    $("seedVerifyBox").classList.add("hidden");
-  }
-
-  function wipeSeed() {
+  function wipeSeed(silent) {
     seedOk = false;
     seedWords = null;
+    seedFingerprint = null;
     if (seedBytes) seedBytes.fill(0);
     seedBytes = null;
-    if ($("seedIn")) $("seedIn").value = "";
-    if ($("seedVerifyBox")) $("seedVerifyBox").classList.add("hidden");
-    if ($("load-seed-status"))
-      $("load-seed-status").innerHTML = '<span class="ok">Seed wiped</span>';
-    if ($("show-seed-out")) $("show-seed-out").textContent = "(seed not loaded)";
-    updateFooter();
+    seedQrVisible = false;
+    if (!silent) setStatus("Seed wiped", "ok");
+    renderAll();
   }
 
-  /* ---------- sign (same crypto as before) ---------- */
+  /* ---------- sign ---------- */
   function bip143Sighash(tx, inputIndex, scriptCode, amount, sighashType) {
     const hashPrevouts = doubleSha256(
       concat(tx.inputs.map((i) => concat([i.txid, le32(i.vout)])))
@@ -3112,18 +3776,12 @@ globalThis.FKT_WORDLIST = {wordlist: e};
   }
 
   function doSign() {
-    const st = $("sign-status");
     if (!psbtMeta) {
-      st.innerHTML = '<span class="err">❌ No PSBT loaded</span>';
+      setStatus("No PSBT loaded", "err");
       return;
     }
     if (!seedBytes || !seedOk) {
-      st.innerHTML = '<span class="err">❌ No seed loaded</span>';
-      return;
-    }
-    const conf = ($("sign-confirm").value || "").trim().toLowerCase();
-    if (conf !== "confirm") {
-      st.innerHTML = '<span class="err">Type CONFIRM to authorize</span>';
+      setStatus("No seed loaded", "err");
       return;
     }
     try {
@@ -3139,9 +3797,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
         const w = newInputMaps[i].find((e) => e.type === 1);
         if (!w) throw new Error("IN[" + i + "] missing witness UTXO");
         const v = w.val;
-        const lo = v[0] | (v[1] << 8) | (v[2] << 16) | (v[3] << 24);
-        const hi = v[4] | (v[5] << 8) | (v[6] << 16) | (v[7] << 24);
-        amounts.push(hi * 0x100000000 + (lo >>> 0));
+        amounts.push(readLe64(v, 0));
         let spkLen = v[8],
           off = 9;
         if (spkLen === 0xfd) {
@@ -3209,22 +3865,22 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       }
       signedBytes = serializePsbt(m.gmap, newInputMaps, m.outputMaps);
       $("psbtOut").value = bytesToB64(signedBytes);
-      st.innerHTML =
-        '<span class="ok">✅ Signed ' +
-        signedCount +
-        " input(s) · " +
-        signedBytes.length +
-        " bytes — seed wiped</span>";
-      $("sign-confirm").value = "";
-      wipeSeed();
-      setScreen("output");
+      $("signedPanel").classList.remove("hidden");
+      $("qrWrap").classList.add("hidden");
+      setStatus(
+        "Signed " + signedCount + " input(s) · " + signedBytes.length + " bytes — seed wiped",
+        "ok"
+      );
+      wipeSeed(true);
+      lowerView = "psbt";
+      renderAll();
     } catch (e) {
       console.error(e);
-      st.innerHTML = '<span class="err">❌ ' + e.message + "</span>";
+      setStatus(e.message || String(e), "err");
     }
   }
 
-  /* ---------- QR scan (camera + jsQR if available, else BarcodeDetector) ---------- */
+  /* ---------- QR scan unified ---------- */
   function stopScan() {
     if (scanTimer) {
       clearInterval(scanTimer);
@@ -3239,25 +3895,64 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       v.srcObject = null;
       v.classList.add("hidden");
     }
-    scanTarget = null;
+    scanning = false;
+    const tgt = $("scanTarget");
+    if (tgt) tgt.classList.remove("scanning", "active");
+    $("scanIdle").classList.remove("hidden");
+    if ($("btnStopScan")) $("btnStopScan").classList.add("hidden");
   }
 
-  async function startScan(target) {
+  function looksLikePsbt(text) {
+    const t = text.replace(/\s+/g, "");
+    if (t.startsWith("cHNidP")) return true;
+    if (/^[A-Za-z0-9+/=]+$/.test(t) && t.length > 40) {
+      try {
+        const b = b64ToBytes(t);
+        return b[0] === 0x70 && b[1] === 0x73 && b[2] === 0x62 && b[3] === 0x74;
+      } catch (e) {
+        return false;
+      }
+    }
+    return false;
+  }
+  function looksLikeSeed(text) {
+    const words = text.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return words.length === 12 || words.length === 24;
+  }
+
+  function onScanPayload(text) {
+    text = (text || "").trim();
+    if (!text) return;
+    if (looksLikePsbt(text)) {
+      try {
+        loadPsbtFromBytes(b64ToBytes(text.replace(/\s+/g, "")));
+        stopScan();
+        setStatus("Scanned PSBT", "ok");
+      } catch (e) {
+        setStatus("Scan PSBT: " + e.message, "err");
+      }
+      return;
+    }
+    if (looksLikeSeed(text)) {
+      try {
+        validateSeedFromText(text);
+        lowerView = "seed";
+        stopScan();
+        renderAll();
+      } catch (e) {
+        setStatus("Scan seed: " + e.message, "err");
+      }
+      return;
+    }
+    setStatus("QR not recognized as seed or PSBT", "err");
+  }
+
+  async function startScan() {
     stopScan();
-    scanTarget = target;
-    const statusId = target === "psbt" ? "load-psbt-status" : "load-seed-status";
     const video = $("scan-video");
     const canvas = $("scan-canvas");
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      $(statusId).innerHTML =
-        '<span class="err">📷 Camera not available — use type/browse below</span>';
-      if (target === "psbt") {
-        psbtLoadMode = "manual";
-        showPsbtMode();
-      } else {
-        seedLoadMode = "manual";
-        showSeedMode();
-      }
+      setStatus("Camera not available — use manual entry", "err");
       return;
     }
     try {
@@ -3266,12 +3961,15 @@ globalThis.FKT_WORDLIST = {wordlist: e};
         audio: false,
       });
       video.srcObject = videoStream;
-      var host = target === "psbt" ? $("psbt-scan-box") : $("seed-scan-box");
-      if (host && video.parentElement !== host) host.insertBefore(video, host.firstChild);
+      const host = $("scanVideoHost");
+      if (host && video.parentElement !== host) host.appendChild(video);
       video.classList.remove("hidden");
+      $("scanIdle").classList.add("hidden");
       await video.play();
-      $(statusId).innerHTML =
-        '<span class="ok">📷 Scanning… point at a QR code</span>';
+      scanning = true;
+      $("scanTarget").classList.add("scanning", "active");
+      $("btnStopScan").classList.remove("hidden");
+      setStatus("Scanning… point at seed or PSBT QR", "ok");
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       const BD = window.BarcodeDetector;
       let detector = null;
@@ -3290,186 +3988,616 @@ globalThis.FKT_WORDLIST = {wordlist: e};
         try {
           if (detector) {
             const codes = await detector.detect(canvas);
-            if (codes && codes[0] && codes[0].rawValue) {
-              onScanPayload(codes[0].rawValue, target);
-            }
+            if (codes && codes[0] && codes[0].rawValue) onScanPayload(codes[0].rawValue);
           } else if (window.jsQR) {
             const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
             const code = jsQR(img.data, img.width, img.height);
-            if (code && code.data) onScanPayload(code.data, target);
-          } else {
-            $(statusId).innerHTML =
-              '<span class="dim">📷 Camera live — auto-decode needs BarcodeDetector or jsQR. Use type/browse if stuck.</span>';
+            if (code && code.data) onScanPayload(code.data);
           }
         } catch (e) {
           /* keep scanning */
         }
       }, 400);
     } catch (e) {
-      $(statusId).innerHTML =
-        '<span class="err">📷 Camera denied — switch to type/browse</span>';
-      if (target === "psbt") {
-        psbtLoadMode = "manual";
-        showPsbtMode();
-      } else {
-        seedLoadMode = "manual";
-        showSeedMode();
-      }
+      setStatus("Camera denied — use manual entry", "err");
+      stopScan();
     }
   }
 
-  function onScanPayload(text, target) {
-    text = (text || "").trim();
+  /* ---------- QR render helpers ---------- */
+  function renderQrToImg(text, imgEl) {
+    if (!text || !imgEl || typeof qrcode !== "function") return;
+    try {
+      const qr = qrcode(0, "M");
+      qr.addData(text);
+      qr.make();
+      imgEl.src = qr.createDataURL(4, 2);
+      imgEl.classList.remove("hidden");
+    } catch (e) {
+      imgEl.classList.add("hidden");
+    }
+  }
+
+  function renderAsciiQr(text) {
+    const wrap = $("qrWrap");
+    const ascii = $("qrAscii");
     if (!text) return;
-    if (target === "psbt") {
-      try {
-        let bytes;
-        if (text.startsWith("cHNidP") || /^[A-Za-z0-9+/=]+$/.test(text.replace(/\s/g, ""))) {
-          bytes = b64ToBytes(text);
-        } else {
-          throw new Error("QR is not PSBT Base64");
+    wrap.classList.remove("hidden");
+    try {
+      if (text.length > 900) {
+        ascii.textContent = "Payload large — use Download.";
+        return;
+      }
+      const qr = qrcode(0, "M");
+      qr.addData(text);
+      qr.make();
+      const n = qr.getModuleCount();
+      const blk = String.fromCharCode(0x2588) + String.fromCharCode(0x2588);
+      const lines = [];
+      const b = 2;
+      for (let y = -b; y < n + b; y++) {
+        let row = "";
+        for (let x = -b; x < n + b; x++) {
+          const dark = x >= 0 && y >= 0 && x < n && y < n && qr.isDark(y, x);
+          row += dark ? blk : "  ";
         }
-        loadPsbtFromBytes(bytes);
-        $("psbtIn").value = text.replace(/\s+/g, "");
-        stopScan();
-        $("load-psbt-status").innerHTML =
-          '<span class="ok">✅ Scanned PSBT</span>';
-      } catch (e) {
-        $("load-psbt-status").innerHTML =
-          '<span class="err">❌ ' + e.message + "</span>";
+        lines.push(row);
       }
-    } else if (target === "seed") {
-      try {
-        validateSeedFromText(text);
-        $("seedIn").value = text.toLowerCase().replace(/\s+/g, " ").trim();
-        stopScan();
-        $("load-seed-status").innerHTML =
-          '<span class="ok">✅ Scanned seed · ' + seedWords.length + " words</span>";
-      } catch (e) {
-        $("load-seed-status").innerHTML =
-          '<span class="err">❌ ' + e.message + "</span>";
-      }
+      ascii.textContent = lines.join("\n");
+    } catch (e) {
+      ascii.textContent = "QR: " + e.message;
     }
   }
 
-  function showPsbtMode() {
-    $("psbt-scan-panel").classList.toggle("hidden", psbtLoadMode !== "scan");
-    $("psbt-manual-panel").classList.toggle("hidden", psbtLoadMode !== "manual");
-    $("btn-psbt-to-manual").classList.toggle("hidden", psbtLoadMode !== "scan");
-    $("btn-psbt-to-scan").classList.toggle("hidden", psbtLoadMode !== "manual");
+  /* ---------- keygen ritual ---------- */
+  function openKeygen() {
+    keygenPhase = "choose";
+    keygenWordCount = 12;
+    keygenPct = 0;
+    keygenRolls = 0;
+    keygenLastRoll = 0;
+    keygenSpin = 0;
+    keygenRollTimes = [];
+    keygenWords = null;
+    keygenEntropyPool = [];
+    keygenQrVisible = false;
+    $("keygenScreen").classList.remove("hidden");
+    renderKeygen();
+    setStatus("KEYGEN · create new wallet", "ok");
   }
-  function showSeedMode() {
-    $("seed-scan-panel").classList.toggle("hidden", seedLoadMode !== "scan");
-    $("seed-manual-panel").classList.toggle("hidden", seedLoadMode !== "manual");
-    $("btn-seed-to-manual").classList.toggle("hidden", seedLoadMode !== "scan");
-    $("btn-seed-to-scan").classList.toggle("hidden", seedLoadMode !== "manual");
+  function closeKeygen() {
+    keygenPhase = "closed";
+    keygenWords = null;
+    keygenEntropyPool = [];
+    $("keygenScreen").classList.add("hidden");
+    setStatus("KEYGEN aborted");
   }
-
-  function flashMenu(msg) {
-    $("menu-status").innerHTML = '<span class="ok">' + msg + "</span>";
+  function keygenChoose(n) {
+    keygenWordCount = n;
+    keygenPhase = "entropy";
+    keygenPct = 0;
+    keygenRolls = 0;
+    keygenRollTimes = [];
+    keygenEntropyPool = [];
+    renderKeygen();
+    setStatus("KEYGEN · entropy ritual · " + n + "-word");
   }
-
-  /* ---------- show seed / new wallet ---------- */
-  function showSeedScreen() {
-    if (!seedOk || !seedWords) {
-      $("show-seed-out").textContent = "(seed not loaded — use menu 1)";
-    } else {
-      $("show-seed-out").textContent = seedWords
-        .map((w, i) => String(i + 1).padStart(2, "0") + ". " + w)
-        .join("\n");
-    }
+  function keygenRoll() {
+    if (keygenPhase !== "entropy" || keygenPct >= 420) return;
+    const r = performance.now() | 0;
+    keygenRollTimes.push(r);
+    const a = ((r ^ (keygenRolls * 17) ^ (keygenRollTimes.length * 13)) % 6) + 1;
+    keygenLastRoll = a;
+    keygenSpin = (keygenSpin + 1) % 4;
+    keygenRolls++;
+    const prev = keygenRollTimes.length > 1 ? keygenRollTimes[keygenRollTimes.length - 2] : null;
+    const dt = prev == null ? 400 : Math.min(2000, Math.max(40, r - prev));
+    const step = Math.max(3, Math.min(14, Math.floor(dt / 80) + 2));
+    keygenPct = Math.min(420, keygenPct + step);
+    /* mix browser CSPRNG into pool */
+    const rnd = new Uint8Array(8);
+    crypto.getRandomValues(rnd);
+    for (let i = 0; i < rnd.length; i++) keygenEntropyPool.push(rnd[i] ^ ((r >> (i * 3)) & 0xff));
+    keygenEntropyPool.push(a, dt & 0xff);
+    renderKeygen();
   }
-
-  function createWallet() {
-    const n = parseInt($("new-word-count").value, 10);
-    if (n !== 12 && n !== 24) {
-      $("new-wallet-status").innerHTML = '<span class="err">Choose 12 or 24</span>';
+  function keygenFinishEntropy() {
+    if (keygenPhase !== "entropy") return;
+    if (keygenPct < 100) {
+      setStatus("Need more chaos… keep pressing Space / ROLL", "err");
       return;
     }
-    const entBytes = n === 12 ? 16 : 32;
+    const entBytes = keygenWordCount === 12 ? 16 : 32;
     const ent = new Uint8Array(entBytes);
     crypto.getRandomValues(ent);
-    /* entropyToMnemonic from bip39 */
+    /* mix collected pool */
+    for (let i = 0; i < keygenEntropyPool.length; i++) {
+      ent[i % entBytes] ^= keygenEntropyPool[i] & 0xff;
+    }
+    const t = new Uint8Array(4);
+    const dv = new DataView(t.buffer);
+    dv.setUint32(0, performance.now() >>> 0, true);
+    for (let i = 0; i < 4; i++) ent[i] ^= t[i];
     const m = bip39.entropyToMnemonic(ent, wordlist);
-    $("seedIn").value = m;
+    keygenWords = m.split(" ");
+    keygenPhase = "reveal";
+    keygenQrVisible = false;
+    renderKeygen();
+    setStatus("KEYGEN · write down your seed", "ok");
+  }
+  function keygenAccept() {
+    if (!keygenWords) return;
     try {
-      validateSeedFromText(m);
-      $("new-wallet-status").innerHTML =
-        '<span class="ok">✅ New ' +
-        n +
-        "-word seed loaded into session — WRITE IT DOWN offline</span>";
-      $("new-seed-out").textContent = seedWords
-        .map((w, i) => String(i + 1).padStart(2, "0") + ". " + w)
-        .join("\n");
+      validateSeedFromText(keygenWords.join(" "));
+      keygenPhase = "closed";
+      $("keygenScreen").classList.add("hidden");
+      lowerView = "seed";
+      renderAll();
+      setStatus("New seed accepted · " + seedWords.length + " words", "ok");
     } catch (e) {
-      $("new-wallet-status").innerHTML = '<span class="err">' + e.message + "</span>";
+      setStatus(e.message, "err");
     }
   }
 
-  /* ---------- wire UI ---------- */
-  function wire() {
-    /* main menu */
-    document.querySelectorAll("[data-goto]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const g = btn.getAttribute("data-goto");
-        if (g === "show-seed") showSeedScreen();
-        if (g === "preview") renderPreview();
-        if (g === "sign") {
-          $("sign-status").textContent = "";
-          $("sign-confirm").value = "";
-          if (!psbtMeta)
-            $("sign-status").innerHTML = '<span class="err">❌ Load a PSBT first (2)</span>';
-          else if (!seedOk)
-            $("sign-status").innerHTML = '<span class="err">❌ Load a seed first (1)</span>';
-          else
-            $("sign-status").innerHTML =
-              '<span class="ok">Ready — type CONFIRM to sign</span>';
-        }
-        setScreen(g);
-      });
-    });
-    $("btn-exit").onclick = () => {
-      wipeSeed();
-      psbtMeta = null;
-      psbtBytes = null;
-      updateFooter();
-      flashMenu("Session cleared. You can close this tab.");
-    };
+  function spinGlyph() {
+    return ["|", "/", "-", "\\"][keygenSpin % 4];
+  }
 
-    /* load PSBT */
-    $("btn-psbt-to-manual").onclick = () => {
-      stopScan();
-      psbtLoadMode = "manual";
-      showPsbtMode();
+  function renderKeygen() {
+    const body = $("keygenBody");
+    if (!body) return;
+    if (keygenPhase === "choose") {
+      body.innerHTML =
+        '<div class="keygen-subtitle">CREATE NEW WALLET</div>' +
+        '<p class="keygen-line">Enter number of words (12 or 24):</p>' +
+        '<div class="row-2" style="margin-top:0.85rem">' +
+        '<button type="button" class="crt-btn crt-btn-primary" id="kg12">12 WORDS' +
+        '<div style="margin-top:0.25rem;font-size:0.7rem;font-weight:400;opacity:0.8">128-bit class</div></button>' +
+        '<button type="button" class="crt-btn crt-btn-primary" id="kg24">24 WORDS' +
+        '<div style="margin-top:0.25rem;font-size:0.7rem;font-weight:400;opacity:0.8">256-bit · default</div></button>' +
+        "</div>" +
+        '<div class="keygen-footer-keys"><span>[Esc] Cancel</span></div>' +
+        '<button type="button" class="crt-btn crt-btn-ghost crt-btn-full" id="kgAbortChoose" style="margin-top:0.75rem">ABORT</button>';
+      $("kg12").onclick = () => keygenChoose(12);
+      $("kg24").onclick = () => keygenChoose(24);
+      $("kgAbortChoose").onclick = closeKeygen;
+      return;
+    }
+    if (keygenPhase === "entropy") {
+      const r = keygenPct;
+      /* bar uses g = min(pct,100) so full width at 100%; chaos % continues past */
+      const g = Math.min(r, 100);
+      const bits = Math.min(Math.floor((r * 256) / 100), 1075);
+      const fill = Math.min(30, Math.floor((g * 30) / 100));
+      const bar = "█".repeat(fill) + "░".repeat(Math.max(0, 30 - fill));
+      const unlocked = r >= 100;
+      const quantum = r >= 420;
+      const pctShown = Math.min(r, 420);
+      body.innerHTML =
+        '<div class="keygen-subtitle">CREATE NEW WALLET — ENTROPY RITUAL</div>' +
+        '<p class="keygen-line">Provide your own randomness. Press Space to roll dice.</p>' +
+        '<pre class="keygen-pre" aria-live="polite">Entropy collected: ' +
+        String(bits).padStart(4, " ") +
+        " bits   [" +
+        bar +
+        "]  " +
+        String(pctShown).padStart(3, " ") +
+        "%</pre>" +
+        '<p class="keygen-line">Press Space repeatedly or wait between presses…</p>' +
+        '<p class="keygen-dim">(The longer / more chaotic the better)</p>' +
+        '<pre class="keygen-pre">Roll: ' +
+        String(keygenLastRoll || 0).padStart(2, " ") +
+        "   Spin: " +
+        spinGlyph() +
+        (keygenRolls > 0 ? "  [*]" : "") +
+        "</pre>" +
+        (unlocked && !quantum
+          ? '<p class="keygen-dim">[ 100% — finish unlocked · keep rolling for deeper entropy ]</p>'
+          : "") +
+        (quantum ? '<p class="keygen-quantum">[ QUANTUM RESISTANCE REACHED ]</p>' : "") +
+        (quantum
+          ? '<p class="keygen-dim">[Space] locked — quantum saturation reached</p>'
+          : "") +
+        '<div class="row-2" style="margin-top:0.75rem">' +
+        '<button type="button" class="crt-btn crt-btn-primary" id="kgRoll"' +
+        (quantum ? " disabled" : "") +
+        ">[Space] ADD ENTROPY / ROLL</button>" +
+        '<button type="button" class="crt-btn crt-btn-primary" id="kgFinish"' +
+        (unlocked ? "" : " disabled") +
+        ">[Enter] FINISH · " +
+        keygenWordCount +
+        "-WORD SEED</button>" +
+        "</div>" +
+        (unlocked
+          ? '<p class="keygen-dim" style="margin-top:0.5rem">Tip: This is more secure than most hardware wallets if you do it right.</p>'
+          : '<p class="keygen-dim" style="margin-top:0.5rem">Need more chaos… finish unlocks at 100% (seed reveal).</p>') +
+        '<div class="keygen-footer-keys">' +
+        "<span>[Space] Add entropy</span>" +
+        "<span>[Enter] Finish &amp; generate</span>" +
+        "<span>[Esc] Cancel</span>" +
+        "</div>" +
+        '<button type="button" class="crt-btn crt-btn-ghost crt-btn-full" id="kgAbortEnt" style="margin-top:0.5rem">ABORT</button>';
+      $("kgRoll").onclick = keygenRoll;
+      $("kgFinish").onclick = keygenFinishEntropy;
+      $("kgAbortEnt").onclick = closeKeygen;
+      return;
+    }
+    if (keygenPhase === "reveal" && keygenWords) {
+      const cells = keygenWords
+        .map(
+          (w, i) =>
+            '<div class="word-cell"><span class="n">' +
+            String(i + 1).padStart(2, "0") +
+            "</span>" +
+            esc(w) +
+            "</div>"
+        )
+        .join("");
+      body.innerHTML =
+        '<div class="keygen-subtitle">GENERATED SEED — WRITE THIS DOWN</div>' +
+        '<div class="keygen-warn">Anyone who sees these words can steal your funds. Write on paper and store offline. This is the ONLY display — no automatic file export.</div>' +
+        '<div class="word-grid">' +
+        cells +
+        "</div>" +
+        '<div class="row-2">' +
+        '<button type="button" class="crt-btn crt-btn-ghost" id="kgToggleQr">' +
+        (keygenQrVisible ? "HIDE QR CODE" : "SHOW QR CODE") +
+        "</button>" +
+        '<button type="button" class="crt-btn crt-btn-primary" id="kgAccept">ACCEPT → SEED TAB</button>' +
+        "</div>" +
+        '<div id="kgQrBox" class="' +
+        (keygenQrVisible ? "" : "hidden") +
+        ' seed-qr-wrap"><img id="kgQrImg" class="seed-qr-img" alt="Seed QR"><div class="seed-qr-caption">SEED QR · photograph offline</div></div>' +
+        '<button type="button" class="crt-btn crt-btn-ghost crt-btn-full" id="kgAbortRev" style="margin-top:0.75rem">ABORT</button>';
+      $("kgToggleQr").onclick = () => {
+        keygenQrVisible = !keygenQrVisible;
+        renderKeygen();
+      };
+      $("kgAccept").onclick = keygenAccept;
+      $("kgAbortRev").onclick = closeKeygen;
+      if (keygenQrVisible) renderQrToImg(keygenWords.join(" "), $("kgQrImg"));
+    }
+  }
+
+  function updateTabs() {
+    const seedTab = $("tabSeed");
+    const psbtTab = $("tabPsbt");
+    seedTab.classList.toggle("active", lowerView === "seed");
+    psbtTab.classList.toggle("active", lowerView === "psbt");
+    seedTab.classList.toggle("loaded", !!seedOk);
+    psbtTab.classList.toggle("loaded", !!psbtMeta);
+    $("dotSeed").classList.toggle("on", !!seedOk);
+    $("dotPsbt").classList.toggle("on", !!psbtMeta);
+  }
+
+  function renderSeedPanel() {
+    const el = $("panelSeed");
+    if (!seedOk || !seedWords) {
+      el.innerHTML =
+        '<div class="panel-empty"><div>No seed loaded…</div>' +
+        '<div class="hint">Scan a BIP39 QR, enter manually, or run KEYGEN below.</div></div>';
+      return;
+    }
+    const cells = seedWords
+      .map(
+        (w, i) =>
+          '<div class="word-cell"><span class="n">' +
+          String(i + 1).padStart(2, "0") +
+          "</span>" +
+          esc(w) +
+          "</div>"
+      )
+      .join("");
+    el.innerHTML =
+      '<div class="meta-line"><span class="k">FINGERPRINT</span> · <span class="fp-mono">' +
+      esc(seedFingerprint || "—") +
+      "</span></div>" +
+      '<div class="meta-line"><span class="k">WORDS</span> · ' +
+      seedWords.length +
+      "</div>" +
+      '<div class="word-grid">' +
+      cells +
+      "</div>" +
+      '<div class="row-2">' +
+      '<button type="button" class="crt-btn crt-btn-ghost" id="btnToggleSeedQr">' +
+      (seedQrVisible ? "HIDE SEED QR" : "SHOW SEED QR") +
+      "</button>" +
+      '<button type="button" class="crt-btn crt-btn-ghost" id="btnWipeSeedPanel">WIPE SEED</button>' +
+      "</div>" +
+      '<div id="seedQrBox" class="' +
+      (seedQrVisible ? "" : "hidden") +
+      ' seed-qr-wrap"><img id="seedQrImg" class="seed-qr-img" alt="Seed QR"><div class="seed-qr-caption">SEED QR</div></div>';
+    $("btnToggleSeedQr").onclick = () => {
+      seedQrVisible = !seedQrVisible;
+      renderSeedPanel();
     };
-    $("btn-psbt-to-scan").onclick = () => {
-      psbtLoadMode = "scan";
-      showPsbtMode();
-      startScan("psbt");
-    };
-    $("btnParse").onclick = () => {
-      try {
-        const raw = $("psbtIn").value.trim();
+    $("btnWipeSeedPanel").onclick = wipeSeed;
+    if (seedQrVisible) renderQrToImg(seedWords.join(" "), $("seedQrImg"));
+  }
+
+  function renderPsbtPanel() {
+    const el = $("panelPsbt");
+    if (!psbtReview) {
+      el.innerHTML =
+        '<div class="panel-empty"><div>No PSBT loaded…</div>' +
+        '<div class="hint">Scan a PSBT QR or enter base64 / file manually.</div></div>';
+      return;
+    }
+    const t = psbtReview;
+    let outs = t.outputsDetail
+      .map((o) => {
+        return (
+          '<div class="output-row">' +
+          '<div class="out-top">' +
+          '<span class="out-badge ' +
+          (o.isChange ? "change" : "send") +
+          '">' +
+          (o.isChange ? "CHANGE" : "SEND") +
+          "</span>" +
+          '<span class="out-amt">' +
+          esc(o.amountBtc) +
+          "</span>" +
+          "</div>" +
+          '<div class="out-addr" title="' +
+          esc(o.address) +
+          '">' +
+          '<span class="addr-short">' +
+          esc(o.addressShort) +
+          "</span>" +
+          '<span class="addr-full hidden">' +
+          esc(o.address) +
+          "</span>" +
+          "</div></div>"
+        );
+      })
+      .join("");
+
+    const canSign = seedOk && !!psbtMeta;
+    let html =
+      '<div class="section-title">OUTPUTS</div>' +
+      outs +
+      '<div class="stat-grid">' +
+      '<div class="stat-row"><span class="lab">FEE</span><span class="val">' +
+      esc(t.fee) +
+      " · " +
+      esc(t.feeRate) +
+      "</span></div>" +
+      '<div class="stat-row"><span class="lab">RBF</span><span class="val' +
+      (t.rbf ? " warn" : "") +
+      '">' +
+      (t.rbf ? "YES" : "NO") +
+      "</span></div>" +
+      '<div class="stat-row"><span class="lab">I/O</span><span class="val">' +
+      t.inputCount +
+      " in / " +
+      t.outputCount +
+      " out</span></div>" +
+      "</div>";
+
+    if (t.highFee) {
+      html +=
+        '<div class="high-fee-warn">⚠ High fee: fee is ≳ 5% of send amount. Double-check before signing.</div>';
+    }
+
+    html +=
+      '<div class="row-2" style="margin-top:0.75rem">' +
+      '<button type="button" class="crt-btn crt-btn-primary" id="btnSign"' +
+      (canSign ? "" : " disabled") +
+      ">SIGN TRANSACTION</button>" +
+      '<button type="button" class="crt-btn crt-btn-ghost" id="btnWipePsbt">WIPE PSBT</button>' +
+      "</div>";
+
+    /* Technical Details */
+    const inRows = t.inputsDetail
+      .map((inp) => {
+        return (
+          '<div class="tech-io-row">' +
+          '<span class="dim">#' +
+          inp.index +
+          "</span> " +
+          (inp.amountSats != null ? formatSats(inp.amountSats) : "?") +
+          " · " +
+          esc(inp.scriptType) +
+          (inp.path ? " · " + esc(inp.path) : "") +
+          (inp.rbf ? ' <span class="warn">[RBF]</span>' : "") +
+          (inp.address
+            ? '<div class="dim" style="word-break:break-all">' + esc(inp.address) + "</div>"
+            : "") +
+          "</div>"
+        );
+      })
+      .join("");
+    const outRows = t.outputsDetail
+      .map((o) => {
+        return (
+          '<div class="tech-io-row">' +
+          '<span class="dim">#' +
+          o.index +
+          "</span> " +
+          formatSats(o.amount) +
+          " · " +
+          esc(o.scriptType) +
+          (o.isChange ? ' <span class="warn">CHANGE</span>' : "") +
+          (o.path ? " · " + esc(o.path) : "") +
+          '<div style="word-break:break-all">' +
+          esc(o.address) +
+          "</div>" +
+          '<div class="dim">program ' +
+          esc(o.program.slice(0, 48)) +
+          (o.program.length > 48 ? "…" : "") +
+          "</div></div>"
+        );
+      })
+      .join("");
+
+    html +=
+      '<details class="tech-details"><summary>Technical Details</summary>' +
+      '<div class="tech-block"><h4>VERSIONS</h4><div class="body">PSBT (BIP-174) v' +
+      t.psbtVersion +
+      " · TX v" +
+      t.txVersion +
+      " · nLockTime " +
+      t.nLockTime +
+      "</div></div>" +
+      '<div class="tech-block"><h4>UNSIGNED TXID</h4><div class="body">' +
+      esc(t.txid) +
+      "</div></div>" +
+      '<div class="tech-block"><h4>PSBT FINGERPRINT</h4><div class="body">' +
+      esc(t.fingerprint) +
+      "</div></div>" +
+      '<div class="tech-block"><h4>INPUTS</h4><div class="body">' +
+      inRows +
+      "</div></div>" +
+      '<div class="tech-block"><h4>OUTPUTS (DETAIL)</h4><div class="body">' +
+      outRows +
+      "</div></div>" +
+      '<div class="tech-block"><h4>SIZE / FEE MATH</h4><div class="body">est. vsize ' +
+      t.estVsize +
+      " vB · fee " +
+      esc(t.fee) +
+      " · rate " +
+      esc(t.feeRate) +
+      "</div></div>" +
+      '<div class="tech-block"><h4>RAW</h4><div class="body">' +
+      esc(t.rawHead) +
+      "</div></div>" +
+      "</details>";
+
+    el.innerHTML = html;
+    $("btnSign").onclick = doSign;
+    $("btnWipePsbt").onclick = wipePsbt;
+
+    /* fuller addresses on wider layouts */
+    if (window.matchMedia && window.matchMedia("(min-width: 520px)").matches) {
+      el.querySelectorAll(".addr-short").forEach((n) => n.classList.add("hidden"));
+      el.querySelectorAll(".addr-full").forEach((n) => n.classList.remove("hidden"));
+    }
+  }
+
+  function renderAll() {
+    updateTabs();
+    $("panelSeed").classList.toggle("hidden", lowerView !== "seed");
+    $("panelPsbt").classList.toggle("hidden", lowerView !== "psbt");
+    renderSeedPanel();
+    renderPsbtPanel();
+  }
+
+  function clearSession() {
+    wipeSeed(true);
+    wipePsbt(true);
+    stopScan();
+    setStatus("Session cleared", "ok");
+    renderAll();
+  }
+
+  function updateOfflinePill() {
+    const pill = $("offlinePill");
+    if (!pill) return;
+    if (navigator.onLine) {
+      pill.textContent = "ONLINE?";
+      pill.classList.add("warn-online");
+      pill.title = "Browser reports online — air-gap recommended";
+    } else {
+      pill.textContent = "OFFLINE";
+      pill.classList.remove("warn-online");
+      pill.title = "Browser reports offline";
+    }
+  }
+
+  function openManual(kind) {
+    stopScan();
+    $("manualModal").classList.remove("hidden");
+    $("manualModal").dataset.kind = kind;
+    $("manualTitle").textContent =
+      kind === "seed" ? "ENTER SEED MANUALLY" : "ENTER PSBT MANUALLY";
+    $("manualSub").textContent =
+      kind === "seed"
+        ? "Paste or type BIP39 words (12 / 24). Validated with real checksum."
+        : "Paste base64 PSBT or drop a .psbt file.";
+    $("manualSeedBlock").classList.toggle("hidden", kind !== "seed");
+    $("manualPsbtBlock").classList.toggle("hidden", kind !== "psbt");
+    $("manualSeedIn").value = "";
+    $("manualPsbtIn").value = "";
+    $("manualErr").textContent = "";
+  }
+  function closeManual() {
+    $("manualModal").classList.add("hidden");
+  }
+  function submitManual() {
+    const kind = $("manualModal").dataset.kind;
+    $("manualErr").textContent = "";
+    try {
+      if (kind === "seed") {
+        validateSeedFromText($("manualSeedIn").value);
+        lowerView = "seed";
+        closeManual();
+        renderAll();
+      } else {
+        const raw = $("manualPsbtIn").value.trim();
         if (!raw) throw new Error("empty");
         loadPsbtFromBytes(b64ToBytes(raw));
-      } catch (e) {
-        $("load-psbt-status").innerHTML = '<span class="err">❌ ' + e.message + "</span>";
+        closeManual();
       }
+    } catch (e) {
+      $("manualErr").textContent = e.message || String(e);
+      $("manualErr").className = "err";
+    }
+  }
+
+  function wire() {
+    /* theme */
+    function applyTheme(next) {
+      document.documentElement.setAttribute("data-crt", next);
+      $("themeLabel").textContent = next.toUpperCase();
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) {
+        const cs = getComputedStyle(document.documentElement);
+        meta.setAttribute("content", cs.getPropertyValue("--crt-theme-meta").trim() || (next === "amber" ? "#1a1000" : "#001100"));
+      }
+      try {
+        localStorage.setItem("fkt-crt-theme", next);
+      } catch (e) {}
+    }
+    $("themeToggle").onclick = () => {
+      const cur = document.documentElement.getAttribute("data-crt") || "green";
+      applyTheme(cur === "green" ? "amber" : "green");
     };
+    const saved = localStorage.getItem("fkt-crt-theme");
+    if (saved === "amber" || saved === "green") applyTheme(saved);
+
+    updateOfflinePill();
+    window.addEventListener("online", updateOfflinePill);
+    window.addEventListener("offline", updateOfflinePill);
+
+    $("scanTarget").onclick = () => {
+      if (!scanning) startScan();
+    };
+    $("btnStopScan").onclick = (e) => {
+      e.stopPropagation();
+      stopScan();
+      setStatus("Scan stopped");
+    };
+
+    $("btnManualSeed").onclick = () => openManual("seed");
+    $("btnManualPsbt").onclick = () => openManual("psbt");
+    $("btnManualCancel").onclick = closeManual;
+    $("btnManualSubmit").onclick = submitManual;
+    $("manualModal").addEventListener("click", (e) => {
+      if (e.target === $("manualModal")) closeManual();
+    });
+
     $("fileIn").onchange = async (ev) => {
       const f = ev.target.files[0];
       if (!f) return;
       const buf = new Uint8Array(await f.arrayBuffer());
       try {
         if (buf[0] === 0x70 && buf[1] === 0x73) {
-          loadPsbtFromBytes(buf);
-          $("psbtIn").value = bytesToB64(buf);
+          $("manualPsbtIn").value = bytesToB64(buf);
         } else {
-          $("psbtIn").value = new TextDecoder().decode(buf);
-          $("btnParse").click();
+          $("manualPsbtIn").value = new TextDecoder().decode(buf);
         }
       } catch (e) {
-        $("load-psbt-status").innerHTML = '<span class="err">❌ ' + e.message + "</span>";
+        $("manualErr").textContent = e.message;
       }
     };
     const dz = $("dropZone");
@@ -3486,41 +4614,34 @@ globalThis.FKT_WORDLIST = {wordlist: e};
         if (!f) return;
         const buf = new Uint8Array(await f.arrayBuffer());
         try {
-          if (buf[0] === 0x70) {
-            loadPsbtFromBytes(buf);
-            $("psbtIn").value = bytesToB64(buf);
-          } else {
-            $("psbtIn").value = new TextDecoder().decode(buf);
-            $("btnParse").click();
-          }
+          if (buf[0] === 0x70) $("manualPsbtIn").value = bytesToB64(buf);
+          else $("manualPsbtIn").value = new TextDecoder().decode(buf);
         } catch (err) {
-          $("load-psbt-status").innerHTML =
-            '<span class="err">❌ ' + err.message + "</span>";
+          $("manualErr").textContent = err.message;
         }
       };
     }
 
-    /* load seed */
-    $("btn-seed-to-manual").onclick = () => {
-      stopScan();
-      seedLoadMode = "manual";
-      showSeedMode();
+    $("tabSeed").onclick = () => {
+      lowerView = "seed";
+      renderAll();
     };
-    $("btn-seed-to-scan").onclick = () => {
-      seedLoadMode = "scan";
-      showSeedMode();
-      startScan("seed");
+    $("tabPsbt").onclick = () => {
+      lowerView = "psbt";
+      renderAll();
     };
-    $("btnSeedCheck").onclick = validateSeedUI;
-    $("btnSeedVerify").onclick = startVerify;
-    $("btnSeedConfirm").onclick = confirmVerify;
-    $("btnWipeSeed").onclick = wipeSeed;
 
-    /* sign / output */
-    $("btnSign").onclick = doSign;
+    $("btnKeygen").onclick = openKeygen;
+    $("btnClearSession").onclick = clearSession;
+    $("btnKeygenClose").onclick = closeKeygen;
+
     $("btnCopy").onclick = async () => {
-      await navigator.clipboard.writeText($("psbtOut").value);
-      $("out-status").innerHTML = '<span class="ok">Copied</span>';
+      try {
+        await navigator.clipboard.writeText($("psbtOut").value);
+        setStatus("Copied Base64", "ok");
+      } catch (e) {
+        setStatus("Copy failed", "err");
+      }
     };
     $("btnDl").onclick = () => {
       if (!signedBytes) return;
@@ -3529,48 +4650,33 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       a.download = "signed.psbt";
       a.click();
     };
-    $("btnQr").onclick = () => {
-      const t = $("psbtOut").value;
-      if (!t) return;
-      $("qrWrap").classList.remove("hidden");
-      try {
-        if (t.length > 900) {
-          $("qrAscii").textContent = "Payload large — use Download.";
-          return;
-        }
-        const qr = qrcode(0, "M");
-        qr.addData(t);
-        qr.make();
-        const n = qr.getModuleCount();
-        const blk = String.fromCharCode(0x2588) + String.fromCharCode(0x2588);
-        const lines = [];
-        const b = 2;
-        for (let y = -b; y < n + b; y++) {
-          let row = "";
-          for (let x = -b; x < n + b; x++) {
-            const dark = x >= 0 && y >= 0 && x < n && y < n && qr.isDark(y, x);
-            row += dark ? blk : "  ";
-          }
-          lines.push(row);
-        }
-        $("qrAscii").textContent = lines.join("\n");
-      } catch (e) {
-        $("qrAscii").textContent = "QR: " + e.message;
+    $("btnQr").onclick = () => renderAsciiQr($("psbtOut").value);
+
+    document.addEventListener("keydown", (e) => {
+      if (keygenPhase === "closed") return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeKeygen();
+        return;
       }
-    };
+      if (keygenPhase === "entropy") {
+        if (e.key === " " || e.code === "Space") {
+          e.preventDefault();
+          keygenRoll();
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          keygenFinishEntropy();
+        }
+      }
+    });
 
-    $("btn-new-12").onclick = function(){ $("new-word-count").value = "12"; };
-  $("btn-new-24").onclick = function(){ $("new-word-count").value = "24"; };
-  $("btn-new-wallet").onclick = createWallet;
-
-    updateFooter();
-    setScreen("menu");
+    renderAll();
   }
 
-  if (document.readyState === "loading")
-    document.addEventListener("DOMContentLoaded", wire);
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wire);
   else wire();
 })();
 
 </script>
-</body></html>
+</body>
+</html>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Phase 3 PWA smoke: size, offline, required symbols."""
+"""FKT offline PWA smoke: size, offline, required symbols, Phase 0 shell."""
 from __future__ import print_function
 import os, re, sys
 
@@ -31,21 +31,36 @@ def main():
         "FKT_BIP39",
         "FKT_WORDLIST",
         "btnSign",
-        "btnSeedVerify",
         "btnQr",
         "dropZone",
         "cHNidP",
         "qrcode",
         "mnemonicToSeedSync",
         "HDKey",
+        "SIGN TRANSACTION",
+        "ENTER SEED MANUALLY",
+        "ENTER PSBT MANUALLY",
+        "Technical Details",
+        "KEYGEN",
+        "CLEAR SESSION",
+        "SHOW SEED QR",
+        "TAP TO SCAN QR",
     ):
-        failed += check("has_" + s[:24], s in text, "")
-    # offline green-on-black
-    failed += check("retro_green", "#00ff66" in text or "--fg:#00ff66" in text, "")
-    failed += check("airgap_warning", "AIR-GAP" in text, "")
-    failed += check("main_menu", "MAIN MENU" in text, "")
-    failed += check("status_footer", "foot-seed" in text and "foot-psbt" in text, "")
-    failed += check("scan_first", "btn-psbt-to-manual" in text and "btn-seed-to-manual" in text, "")
+        failed += check("has_" + re.sub(r"\W+", "_", s)[:28], s in text, "")
+    # must NOT ship demo chrome
+    for s in ("SIMULATE SEED", "SIMULATE PSBT", "sign-confirm", "Type CONFIRM", "btnSeedVerify"):
+        failed += check("no_" + re.sub(r"\W+", "_", s)[:28], s not in text, "")
+    # CRT theme (green accents)
+    failed += check(
+        "crt_green",
+        "#3dff7a" in text or "--crt-hi: #3dff7a" in text or "--crt-hi:#3dff7a" in text,
+        "",
+    )
+    failed += check("no_alpha_banner", "ALPHA · TESTNET" not in text, "")
+    failed += check("camera_svg", "M14.5 4h-5L7 7H4" in text, "")
+    failed += check("entropy_bar_100", "Math.min(r, 100)" in text or "Math.min(r,100)" in text, "")
+    failed += check("no_main_menu", "MAIN MENU" not in text, "")
+    failed += check("no_footer_status_bar", "foot-seed" not in text, "")
     print("-" * 50)
     if failed:
         print("PWA smoke FAIL", failed)
