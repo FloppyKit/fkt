@@ -46,6 +46,17 @@
       color: var(--hi);
     }
     p { margin: 0.45rem 0; font-size: 0.85rem; color: var(--mid); line-height: 1.45; }
+    .disclaimer {
+      margin: 0.85rem 0 0;
+      padding: 0.65rem 0.7rem;
+      border: 1px solid #ffb020;
+      background: #120c00;
+      color: #ffb020;
+      font-size: 0.72rem;
+      line-height: 1.45;
+      letter-spacing: 0.02em;
+      text-align: left;
+    }
     .actions { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 1.1rem; }
     a.btn {
       display: block;
@@ -73,6 +84,7 @@
   <div class="card">
     <h1>FKT · ICED COLD</h1>
     <p>Offline PSBT signer PWA. Open in the browser (works on phone — no download required).</p>
+    <p class="disclaimer"><strong>Disclaimer:</strong> Never type seed phrases into a device that is connected to the internet. Prefer true air-gap / offline use. Browser risk ≠ ice-cold hardware.</p>
     <div class="actions">
       <a class="btn primary" href="/pwa/">OPEN SIGNER</a>
       <a class="btn" href="https://github.com/FloppyKit/fkt">GITHUB REPO</a>
