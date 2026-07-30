@@ -12,6 +12,10 @@ Single-file offline companion — **Phase 0 dashboard shell** with real crypto:
 
 **No CDN. No simulate buttons. ALPHA / TESTNET experimental.**
 
+**Live (GitHub Pages):** [https://gitfkt.dev/pwa/](https://gitfkt.dev/pwa/)  
+Landing: [https://gitfkt.dev/](https://gitfkt.dev/)
+
+
 File: **`index.html`** (~320 KiB). Mirror: `fkt-offline.html`.
 
 ```bash

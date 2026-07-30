@@ -712,6 +712,23 @@ html[data-crt="amber"] .toggle::after { transform: translateX(20px); }
   margin-top: auto;
   padding-top: 0.35rem;
 }
+.site-foot {
+  text-align: center;
+  margin: 0.35rem 0 0.15rem;
+  padding-bottom: 0.25rem;
+}
+.site-foot a {
+  color: var(--crt-mid);
+  letter-spacing: 0.14em;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-decoration: none;
+  border-bottom: 1px solid var(--crt-border-faint);
+}
+.site-foot a:hover {
+  color: var(--crt-hi);
+  border-bottom-color: var(--crt-hi);
+}
 @media (min-width: 420px) {
   .bottom-actions { flex-direction: row; }
   .bottom-actions .crt-btn { flex: 1; }
@@ -807,6 +824,7 @@ html[data-crt="amber"] .toggle::after { transform: translateX(20px); }
         <button type="button" class="crt-btn crt-btn-primary" id="btnKeygen">+ KEYGEN · NEW SEED</button>
         <button type="button" class="crt-btn crt-btn-ghost" id="btnClearSession">CLEAR SESSION</button>
       </div>
+      <p class="site-foot"><a href="https://gitfkt.dev" target="_blank" rel="noopener">gitfkt.dev</a></p>
     </main>
   </div>
 </div>
