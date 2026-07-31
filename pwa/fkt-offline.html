@@ -3055,6 +3055,8 @@ globalThis.FKT_WORDLIST = {wordlist: e};
   let scanBusy = false;
   let lastScanText = "";
   let scanning = false;
+  /* multi-frame PSBT (BBQR / UR) */
+  let multiScan = null; /* { kind, key, total, parts: Map, meta } */
 
   /* keygen ritual */
   let keygenPhase = "closed"; /* closed | choose | entropy | reveal */
@@ -3734,6 +3736,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
   }
 
   function wipePsbt(silent) {
+    resetMultiScan();
     psbtBytes = null;
     psbtMeta = null;
     psbtReview = null;
@@ -4043,6 +4046,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
   }
 
   function stopScan() {
+    /* keep multiScan across brief stops? No — stop clears animation session */
     if (scanTimer) {
       clearInterval(scanTimer);
       scanTimer = null;
@@ -4074,50 +4078,362 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     if ($("btnStopScan")) $("btnStopScan").classList.add("hidden");
   }
 
-  function onScanPayload(text) {
+  function resetMultiScan() {
+    multiScan = null;
+  }
+
+  function b36(s) {
+    return parseInt(String(s), 36);
+  }
+
+  function hexToBytesUpper(hex) {
+    const h = hex.replace(/\s+/g, "");
+    if (h.length % 2) throw new Error("odd hex length");
+    const o = new Uint8Array(h.length / 2);
+    for (let i = 0; i < o.length; i++) o[i] = parseInt(h.substr(i * 2, 2), 16);
+    return o;
+  }
+
+  function joinUint8(parts) {
+    let n = 0;
+    parts.forEach((p) => (n += p.length));
+    const o = new Uint8Array(n);
+    let off = 0;
+    parts.forEach((p) => {
+      o.set(p, off);
+      off += p.length;
+    });
+    return o;
+  }
+
+  /* RFC 4648 Base32 (A-Z2-7), padding optional */
+  function base32Decode(str) {
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let s = String(str).toUpperCase().replace(/=+$/g, "").replace(/\s+/g, "");
+    let bits = 0;
+    let value = 0;
+    const out = [];
+    for (let i = 0; i < s.length; i++) {
+      const idx = alphabet.indexOf(s[i]);
+      if (idx < 0) throw new Error("bad base32 char: " + s[i]);
+      value = (value << 5) | idx;
+      bits += 5;
+      if (bits >= 8) {
+        out.push((value >>> (bits - 8)) & 0xff);
+        bits -= 8;
+      }
+    }
+    return new Uint8Array(out);
+  }
+
+  async function inflateRawDeflate(bytes) {
+    if (typeof DecompressionStream === "undefined") {
+      throw new Error("BBQR zlib needs a modern browser (DecompressionStream)");
+    }
+    const ds = new DecompressionStream("deflate-raw");
+    const stream = new Blob([bytes]).stream().pipeThrough(ds);
+    const ab = await new Response(stream).arrayBuffer();
+    return new Uint8Array(ab);
+  }
+
+  async function decodeBBQRParts(bodies, encoding) {
+    encoding = String(encoding).toUpperCase();
+    if (encoding === "H") {
+      return joinUint8(bodies.map((b) => hexToBytesUpper(b)));
+    }
+    /* Base32 (2) or Zlib+Base32 (Z) */
+    const raw = joinUint8(
+      bodies.map((b) => {
+        const pad = (8 - (b.length % 8)) % 8;
+        return base32Decode(b + "=".repeat(pad));
+      })
+    );
+    if (encoding === "Z") return await inflateRawDeflate(raw);
+    if (encoding === "2") return raw;
+    throw new Error("unsupported BBQR encoding: " + encoding);
+  }
+
+  function isBBQRFrame(text) {
+    const t = text.replace(/\s+/g, "").toUpperCase();
+    return /^B\$[H2Z][A-Z][0-9A-Z]{4}/.test(t) && t.length >= 8;
+  }
+
+  function isURFrame(text) {
+    return /^UR:/i.test(text.trim());
+  }
+
+  async function ingestBBQRFrame(text) {
+    const part = text.replace(/\s+/g, "").toUpperCase();
+    if (part.length < 8) throw new Error("BBQR frame too short");
+    const hdr6 = part.slice(0, 6); /* B$ + enc + type + total2 */
+    const encoding = part[2];
+    const fileType = part[3];
+    const total = b36(part.slice(4, 6));
+    const idx = b36(part.slice(6, 8));
+    const body = part.slice(8);
+    if (!(total >= 1) || idx >= total) throw new Error("BBQR index out of range");
+
+    if (!multiScan || multiScan.kind !== "bbqr" || multiScan.key !== hdr6) {
+      multiScan = {
+        kind: "bbqr",
+        key: hdr6,
+        encoding: encoding,
+        fileType: fileType,
+        total: total,
+        parts: new Map(),
+      };
+    }
+    multiScan.parts.set(idx, body);
+    const have = multiScan.parts.size;
+    setStatus("BBQR " + have + "/" + total + " · keep holding on animated QR", "ok");
+    if (have < total) return null;
+
+    const bodies = [];
+    for (let i = 0; i < total; i++) {
+      if (!multiScan.parts.has(i)) {
+        setStatus("BBQR missing part " + i, "err");
+        return null;
+      }
+      bodies.push(multiScan.parts.get(i));
+    }
+    const raw = await decodeBBQRParts(bodies, multiScan.encoding);
+    const ft = multiScan.fileType;
+    resetMultiScan();
+    return { raw: raw, fileType: ft };
+  }
+
+  /* Classic sequential UR: UR:TYPE/1OF3/DIGEST/FRAGMENT or UR:TYPE/FRAGMENT */
+  function parseURFrame(text) {
+    const t = text.trim();
+    const pieces = t.split("/");
+    if (pieces.length < 2) return null;
+    const header = pieces[0].toUpperCase();
+    if (!header.startsWith("UR:")) return null;
+    const type = header.slice(3).toLowerCase();
+
+    if (pieces.length === 2) {
+      return { type: type, index: 1, total: 1, digest: "", fragment: pieces[1], fmt: "single" };
+    }
+    if (pieces.length === 3) {
+      /* UR:TYPE/DIGEST/FRAGMENT */
+      return { type: type, index: 1, total: 1, digest: pieces[1], fragment: pieces[2], fmt: "digest" };
+    }
+    if (pieces.length >= 4) {
+      const seq = pieces[1].toUpperCase();
+      let index, total;
+      if (seq.indexOf("OF") >= 0) {
+        const sp = seq.split("OF");
+        index = parseInt(sp[0], 10);
+        total = parseInt(sp[1], 10);
+      } else if (seq.indexOf("-") >= 0) {
+        /* modern fountain-style: 1-5 */
+        const sp = seq.split("-");
+        index = parseInt(sp[0], 10);
+        total = parseInt(sp[1], 10);
+      } else {
+        return null;
+      }
+      return {
+        type: type,
+        index: index,
+        total: total,
+        digest: pieces[2],
+        fragment: pieces.slice(3).join("/"),
+        fmt: "multi",
+      };
+    }
+    return null;
+  }
+
+  /* BC32 is bech32-like without checksum for older UR — try hex-like fragment join first;
+     Sparrow animated PSBT is usually BBQR now. For UR we assemble fragments + mini-cbor unwrap. */
+  function bc32DecodeToHex(bc32) {
+    /* bc32 uses charset qpzry9x8gf2tvdw0s3jn54khce6mua7l like bech32 data part */
+    const CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+    const s = String(bc32).toLowerCase().replace(/\s+/g, "");
+    let acc = 0;
+    let bits = 0;
+    const bytes = [];
+    for (let i = 0; i < s.length; i++) {
+      const c = CHARSET.indexOf(s[i]);
+      if (c < 0) throw new Error("bad bc32");
+      acc = (acc << 5) | c;
+      bits += 5;
+      if (bits >= 8) {
+        bytes.push((acc >> (bits - 8)) & 0xff);
+        bits -= 8;
+      }
+    }
+    return bytes;
+  }
+
+  function unwrapSimpleCborBytes(buf) {
+    /* mini CBOR byte-string unwrap used by older UR (BCR-05 style) */
+    if (!buf || !buf.length) return buf;
+    const h = buf[0];
+    if (h >= 0x40 && h <= 0x57) {
+      const n = h - 0x40;
+      return buf.slice(1, 1 + n);
+    }
+    if (h === 0x58) {
+      const n = buf[1];
+      return buf.slice(2, 2 + n);
+    }
+    if (h === 0x59) {
+      const n = (buf[1] << 8) | buf[2];
+      return buf.slice(3, 3 + n);
+    }
+    if (h === 0x5a) {
+      const n = (buf[1] << 24) | (buf[2] << 16) | (buf[3] << 8) | buf[4];
+      return buf.slice(5, 5 + n);
+    }
+    /* already raw? */
+    return buf;
+  }
+
+  async function ingestURFrame(text) {
+    const parsed = parseURFrame(text);
+    if (!parsed) {
+      setStatus("Unrecognized UR QR frame", "err");
+      return null;
+    }
+    const key = "ur:" + parsed.type + ":" + parsed.total + ":" + (parsed.digest || "");
+    if (!multiScan || multiScan.kind !== "ur" || multiScan.key !== key) {
+      multiScan = {
+        kind: "ur",
+        key: key,
+        type: parsed.type,
+        total: parsed.total,
+        digest: parsed.digest,
+        parts: new Map(),
+      };
+    }
+    /* fountain codes may use index > total; store by index string */
+    multiScan.parts.set(parsed.index, parsed.fragment);
+    const have = multiScan.parts.size;
+    setStatus("UR " + have + "/" + parsed.total + " · " + parsed.type + " · keep scanning", "ok");
+
+    /* For classic sequential UR we need exactly total unique parts 1..total */
+    if (have < parsed.total) return null;
+
+    const frags = [];
+    for (let i = 1; i <= parsed.total; i++) {
+      if (!multiScan.parts.has(i)) {
+        /* fountain: might have extra indices; try sorted keys if sequential missing */
+        setStatus("UR waiting for part " + i + "/" + parsed.total, "ok");
+        return null;
+      }
+      frags.push(multiScan.parts.get(i));
+    }
+    try {
+      const joined = frags.join("");
+      let bytes;
+      try {
+        const raw = bc32DecodeToHex(joined);
+        bytes = unwrapSimpleCborBytes(new Uint8Array(raw));
+      } catch (e1) {
+        /* some URs carry hex payload */
+        if (/^[0-9a-fA-F]+$/.test(joined)) bytes = hexToBytesUpper(joined);
+        else throw e1;
+      }
+      resetMultiScan();
+      return { raw: bytes, fileType: "P" };
+    } catch (e) {
+      setStatus("UR decode: " + e.message + " — try BBQR if available", "err");
+      return null;
+    }
+  }
+
+  async function finishPsbtBytes(bytes, label) {
+    if (!bytes || !bytes.length) throw new Error("empty payload");
+    /* If CBOR-tagged crypto-psbt, try unwrap to raw PSBT */
+    if (!(bytes[0] === 0x70 && bytes[1] === 0x73 && bytes[2] === 0x62 && bytes[3] === 0x74)) {
+      /* sometimes UR wraps raw psbt after cbor; try scan for psbt magic */
+      let found = -1;
+      for (let i = 0; i < Math.min(bytes.length - 5, 64); i++) {
+        if (
+          bytes[i] === 0x70 &&
+          bytes[i + 1] === 0x73 &&
+          bytes[i + 2] === 0x62 &&
+          bytes[i + 3] === 0x74 &&
+          bytes[i + 4] === 0xff
+        ) {
+          found = i;
+          break;
+        }
+      }
+      if (found > 0) bytes = bytes.slice(found);
+    }
+    loadPsbtFromBytes(bytes);
+    stopScan();
+    setStatus((label || "Scanned PSBT") + " · " + bytes.length + " bytes", "ok");
+  }
+
+  async function onScanPayload(text) {
     text = (text || "").trim();
     if (!text) return;
     if (text === lastScanText) return;
     lastScanText = text;
 
-    const fromSeedQr = seedQrDigitsToMnemonic(text);
-    if (fromSeedQr) text = fromSeedQr;
+    try {
+      /* Multi-part PSBT formats first */
+      if (isBBQRFrame(text)) {
+        const done = await ingestBBQRFrame(text);
+        if (done && done.raw) {
+          if (done.fileType && done.fileType !== "P" && done.fileType !== "T" && done.fileType !== "B") {
+            setStatus("BBQR type " + done.fileType + " loaded as binary", "ok");
+          }
+          await finishPsbtBytes(done.raw, "BBQR PSBT");
+        }
+        return;
+      }
 
-    if (looksLikePsbt(text)) {
-      try {
+      if (isURFrame(text)) {
+        const done = await ingestURFrame(text);
+        if (done && done.raw) await finishPsbtBytes(done.raw, "UR PSBT");
+        return;
+      }
+
+      /* reset multi-scan if we got unrelated frame */
+      if (multiScan && !isBBQRFrame(text) && !isURFrame(text)) {
+        /* keep multiScan alive while animating — only reset on clear/stop */
+      }
+
+      const fromSeedQr = seedQrDigitsToMnemonic(text);
+      if (fromSeedQr) text = fromSeedQr;
+
+      if (looksLikePsbt(text)) {
         let raw = text.replace(/\s+/g, "");
         let bytes;
         if (/^[0-9a-fA-F]+$/.test(raw) && raw.toLowerCase().startsWith("70736274")) {
-          bytes = new Uint8Array(raw.length / 2);
-          for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(raw.substr(i * 2, 2), 16);
+          bytes = hexToBytesUpper(raw);
         } else {
           bytes = b64ToBytes(raw);
         }
-        loadPsbtFromBytes(bytes);
-        stopScan();
-        setStatus("Scanned PSBT", "ok");
-      } catch (e) {
-        setStatus("Scan PSBT: " + e.message, "err");
+        await finishPsbtBytes(bytes, "Scanned PSBT");
+        return;
       }
-      return;
-    }
 
-    if (looksLikeSeed(text) || fromSeedQr) {
-      try {
-        const m = fromSeedQr || normalizeSeedText(text);
-        validateSeedFromText(m);
-        lowerView = "seed";
-        stopScan();
-        renderAll();
-        setStatus("Scanned seed · " + seedWords.length + " words", "ok");
-      } catch (e) {
-        setStatus("Scan seed: " + e.message, "err");
+      if (looksLikeSeed(text) || fromSeedQr) {
+        try {
+          const m = fromSeedQr || normalizeSeedText(text);
+          validateSeedFromText(m);
+          lowerView = "seed";
+          stopScan();
+          renderAll();
+          setStatus("Scanned seed · " + seedWords.length + " words", "ok");
+        } catch (e) {
+          setStatus("Scan seed: " + e.message, "err");
+        }
+        return;
       }
-      return;
-    }
 
-    const preview = text.length > 48 ? text.slice(0, 48) + "…" : text;
-    setStatus("Found QR (" + text.length + " chars) — not a seed/PSBT: " + preview, "err");
+      const preview = text.length > 48 ? text.slice(0, 48) + "…" : text;
+      setStatus("Found QR (" + text.length + " chars) — not seed/PSBT/BBQR: " + preview, "err");
+    } catch (e) {
+      console.error(e);
+      setStatus("Scan error: " + (e.message || e), "err");
+    }
   }
 
   function enhanceForQR(imageData) {
@@ -4243,7 +4559,12 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       } catch (e) {}
 
       var decoderName = decodeFn ? "jsQR" : "BarcodeDetector";
-      setStatus("Camera on · decoder " + decoderName + " · hold Sparrow seed QR in the frame", "ok");
+      setStatus(
+        "Camera on · " +
+          decoderName +
+          " · seed, PSBT, BBQR animated OK — hold QR in corners",
+        "ok"
+      );
 
       var ctx = canvas.getContext("2d", { willReadFrequently: true, alpha: false });
       var detector = null;
@@ -4277,27 +4598,30 @@ globalThis.FKT_WORDLIST = {wordlist: e};
           }
 
           if (!payload && decodeFn) {
-            var maxW = 640;
-            var scale = Math.min(1, maxW / vw);
-            var cw = Math.max(1, (vw * scale) | 0);
-            var ch = Math.max(1, (vh * scale) | 0);
-            if (canvas.width !== cw || canvas.height !== ch) {
-              canvas.width = cw;
-              canvas.height = ch;
-            }
-            ctx.drawImage(video, 0, 0, cw, ch);
-            payload = tryDecodeImageData(decodeFn, ctx.getImageData(0, 0, cw, ch));
-
-            if (!payload) {
-              var csz = Math.min(cw, ch, 480);
-              var sx = ((cw - csz) / 2) | 0;
-              var sy = ((ch - csz) / 2) | 0;
-              if (canvas.width !== csz || canvas.height !== csz) {
-                canvas.width = csz;
-                canvas.height = csz;
+            /* multi-scale: dense BBQR frames need higher res */
+            var tryWidths = multiScan ? [960, 720, 640] : [720, 640, 480];
+            for (var ti = 0; ti < tryWidths.length && !payload; ti++) {
+              var maxW = tryWidths[ti];
+              var scale = Math.min(1, maxW / vw);
+              var cw = Math.max(1, (vw * scale) | 0);
+              var ch = Math.max(1, (vh * scale) | 0);
+              if (canvas.width !== cw || canvas.height !== ch) {
+                canvas.width = cw;
+                canvas.height = ch;
               }
-              ctx.drawImage(video, sx / scale, sy / scale, csz / scale, csz / scale, 0, 0, csz, csz);
-              payload = tryDecodeImageData(decodeFn, ctx.getImageData(0, 0, csz, csz));
+              ctx.drawImage(video, 0, 0, cw, ch);
+              payload = tryDecodeImageData(decodeFn, ctx.getImageData(0, 0, cw, ch));
+              if (!payload) {
+                var csz = Math.min(cw, ch, maxW >= 720 ? 640 : 480);
+                var sx = ((cw - csz) / 2) | 0;
+                var sy = ((ch - csz) / 2) | 0;
+                if (canvas.width !== csz || canvas.height !== csz) {
+                  canvas.width = csz;
+                  canvas.height = csz;
+                }
+                ctx.drawImage(video, sx / scale, sy / scale, csz / scale, csz / scale, 0, 0, csz, csz);
+                payload = tryDecodeImageData(decodeFn, ctx.getImageData(0, 0, csz, csz));
+              }
             }
           }
 
@@ -4309,7 +4633,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
           }
 
           if (payload) {
-            onScanPayload(payload);
+            await onScanPayload(payload);
           } else if (frameN === 1 || Date.now() - lastStatusAt > 3000) {
             lastStatusAt = Date.now();
             setStatus(
@@ -4815,6 +5139,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
   function clearSession() {
     wipeSeed(true);
     wipePsbt(true);
+    resetMultiScan();
     stopScan();
     setStatus("Session cleared", "ok");
     renderAll();
