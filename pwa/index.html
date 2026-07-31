@@ -3238,6 +3238,82 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     return out;
   }
   const doubleSha256 = (d) => sha256pure(sha256pure(d));
+  function hmacSha256pure(key, ...messages) {
+    const block = 64;
+    let k = key instanceof Uint8Array ? key : new Uint8Array(key);
+    if (k.length > block) k = sha256pure(k);
+    if (k.length < block) {
+      const nk = new Uint8Array(block);
+      nk.set(k);
+      k = nk;
+    }
+    const oKey = new Uint8Array(block);
+    const iKey = new Uint8Array(block);
+    for (let i = 0; i < block; i++) {
+      oKey[i] = k[i] ^ 0x5c;
+      iKey[i] = k[i] ^ 0x36;
+    }
+    const innerMsg = concat([iKey].concat(messages.map((m) => (m instanceof Uint8Array ? m : new Uint8Array(m)))));
+    const inner = sha256pure(innerMsg);
+    return sha256pure(concat([oKey, inner]));
+  }
+
+  function ensureSecpHashes() {
+    if (!secp || !secp.utils) throw new Error("secp utils missing");
+    if (typeof secp.utils.sha256Sync !== "function") {
+      secp.utils.sha256Sync = function (...msgs) {
+        return sha256pure(concat(msgs.map((m) => (m instanceof Uint8Array ? m : new Uint8Array(m)))));
+      };
+    }
+    if (typeof secp.utils.hmacSha256Sync !== "function") {
+      secp.utils.hmacSha256Sync = function (key, ...msgs) {
+        return hmacSha256pure(key, ...msgs);
+      };
+    }
+    if (typeof secp.utils.randomBytes !== "function") {
+      secp.utils.randomBytes = function (n) {
+        const a = new Uint8Array(n);
+        (globalThis.crypto || window.crypto).getRandomValues(a);
+        return a;
+      };
+    }
+  }
+
+  function ecdsaSigToCompact(sig) {
+    if (sig instanceof Uint8Array) {
+      if (sig.length === 64) return sig;
+      if (sig.length > 64) return sig.slice(0, 64);
+      throw new Error("short ecdsa sig " + sig.length);
+    }
+    if (sig && typeof sig.toCompactRawBytes === "function") return new Uint8Array(sig.toCompactRawBytes());
+    if (sig && typeof sig.toRawBytes === "function") {
+      try {
+        return new Uint8Array(sig.toRawBytes(true));
+      } catch (e) {
+        return new Uint8Array(sig.toRawBytes());
+      }
+    }
+    if (sig && typeof sig.toCompactHex === "function") {
+      const h = sig.toCompactHex();
+      const o = new Uint8Array(h.length / 2);
+      for (let i = 0; i < o.length; i++) o[i] = parseInt(h.substr(i * 2, 2), 16);
+      return o;
+    }
+    throw new Error(
+      "bad ecdsa sig type: " + (sig && sig.constructor ? sig.constructor.name : typeof sig)
+    );
+  }
+
+  function schnorrSigToBytes(sig) {
+    if (sig instanceof Uint8Array) return sig.length === 64 ? sig : new Uint8Array(sig);
+    if (sig && typeof sig.toRawBytes === "function") return new Uint8Array(sig.toRawBytes());
+    if (ArrayBuffer.isView(sig)) return new Uint8Array(sig.buffer, sig.byteOffset, sig.byteLength);
+    throw new Error(
+      "bad schnorr sig type: " + (sig && sig.constructor ? sig.constructor.name : typeof sig)
+    );
+  }
+
+
 
   function ripemd160pure(msg) {
     function f(j, x, y, z) {
@@ -3886,6 +3962,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       return;
     }
     try {
+      ensureSecpHashes();
       const master = HDKey.fromMasterSeed(seedBytes);
       const m = psbtMeta,
         tx = m.tx;
@@ -3934,9 +4011,8 @@ globalThis.FKT_WORDLIST = {wordlist: e};
             new Uint8Array([0x88, 0xac]),
           ]);
           const sighash = bip143Sighash(tx, i, sc, amounts[i], 1);
-          let sig = secp.signSync(sighash, priv, { der: false });
-          if (sig.toCompactRawBytes) sig = sig.toCompactRawBytes();
-          sig = new Uint8Array(sig);
+          ensureSecpHashes();
+          let sig = ecdsaSigToCompact(secp.signSync(sighash, priv, { der: false }));
           let der = derEncode(sig.slice(0, 32), sig.slice(32));
           der = concat([der, new Uint8Array([1])]);
           const key = concat([new Uint8Array([2]), pub]);
@@ -3955,7 +4031,9 @@ globalThis.FKT_WORDLIST = {wordlist: e};
         } else if (stype === "P2TR") {
           const sighash = bip341KeypathSighash(tx, i, amounts, spks, 0);
           if (!secp.schnorr || !secp.schnorr.signSync) throw new Error("schnorr missing");
-          let sig = new Uint8Array(secp.schnorr.signSync(sighash, priv));
+          ensureSecpHashes();
+          let sig = schnorrSigToBytes(secp.schnorr.signSync(sighash, priv));
+          if (sig.length !== 64) throw new Error("schnorr sig length " + sig.length);
           let filtered = imap.filter((e) => e.type !== 0x13 && e.type !== 8);
           filtered.push({ key: new Uint8Array([0x13]), val: sig, type: 0x13 });
           const wit = concat([writeVarInt(1), writeVarInt(64), sig]);
@@ -5200,6 +5278,11 @@ globalThis.FKT_WORDLIST = {wordlist: e};
   }
 
   function wire() {
+    try {
+      ensureSecpHashes();
+    } catch (e) {
+      console.warn("secp hash setup", e);
+    }
     /* theme */
     function applyTheme(next) {
       document.documentElement.setAttribute("data-crt", next);
