@@ -761,16 +761,36 @@ html[data-crt="amber"] .theme-yy {
   font-size: 0.68rem;
   font-weight: 700;
 }
-#qrAscii {
-  font-size: 5px;
-  line-height: 5px;
-  letter-spacing: 0;
+.signed-qr-wrap {
+  margin-top: 0.65rem;
+  border: 1px solid var(--crt-border);
   background: #fff;
-  color: #000;
-  display: inline-block;
-  padding: 8px;
-  overflow: auto;
-  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.65rem;
+}
+.signed-qr-img {
+  image-rendering: pixelated;
+  width: min(100%, 280px);
+  height: auto;
+  display: block;
+  background: #fff;
+}
+.signed-qr-caption {
+  letter-spacing: 0.08em;
+  color: #111;
+  text-align: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.signed-qr-err {
+  color: #b00000;
+  font-size: 0.75rem;
+  text-align: center;
+  max-width: 20rem;
+  line-height: 1.4;
 }
 .bottom-actions {
   display: flex;
@@ -881,9 +901,13 @@ html[data-crt="amber"] .theme-yy {
         <div class="row-2" style="margin-top:0.5rem">
           <button type="button" class="crt-btn crt-btn-ghost" id="btnCopy">COPY BASE64</button>
           <button type="button" class="crt-btn crt-btn-ghost" id="btnDl">DOWNLOAD .PSBT</button>
-          <button type="button" class="crt-btn crt-btn-ghost" id="btnQr">ASCII QR</button>
+          <button type="button" class="crt-btn crt-btn-ghost" id="btnQr">SHOW QR</button>
         </div>
-        <div id="qrWrap" class="hidden" style="margin-top:0.5rem;overflow:auto"><div id="qrAscii"></div></div>
+        <div id="qrWrap" class="hidden signed-qr-wrap">
+          <img id="signedQrImg" class="signed-qr-img" alt="Signed PSBT QR">
+          <div class="signed-qr-caption">SIGNED PSBT QR · scan with hot wallet</div>
+          <div id="signedQrErr" class="signed-qr-err hidden"></div>
+        </div>
       </section>
 
       <div class="toast" id="statusMsg"></div>
@@ -892,7 +916,7 @@ html[data-crt="amber"] .theme-yy {
         <button type="button" class="crt-btn crt-btn-primary" id="btnKeygen">+ KEYGEN · NEW SEED</button>
         <button type="button" class="crt-btn crt-btn-ghost" id="btnClearSession">CLEAR SESSION</button>
       </div>
-      <p class="site-foot"><a href="https://gitfkt.dev" target="_blank" rel="noopener">gitfkt.dev</a> · <span id="buildTag">build-signfix3</span></p>
+      <p class="site-foot"><a href="https://gitfkt.dev" target="_blank" rel="noopener">gitfkt.dev</a> · <span id="buildTag">build-signfix4</span></p>
     </main>
   </div>
 </div>
@@ -4882,36 +4906,45 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     }
   }
 
-  function renderAsciiQr(text) {
+  function renderSignedQr(text) {
     const wrap = $("qrWrap");
-    const ascii = $("qrAscii");
-    if (!text) return;
+    const img = $("signedQrImg");
+    const err = $("signedQrErr");
+    if (!wrap || !img) return;
+    if (!text) {
+      setStatus("Nothing to show — sign first", "err");
+      return;
+    }
     wrap.classList.remove("hidden");
+    if (err) {
+      err.textContent = "";
+      err.classList.add("hidden");
+    }
+    img.classList.add("hidden");
     try {
-      if (text.length > 900) {
-        ascii.textContent = "Payload large — use Download.";
-        return;
-      }
-      const qr = qrcode(0, "M");
+      if (typeof qrcode !== "function") throw new Error("QR library missing");
+      /* auto version; L ECC for denser PSBT payloads */
+      const qr = qrcode(0, "L");
       qr.addData(text);
       qr.make();
-      const n = qr.getModuleCount();
-      const blk = String.fromCharCode(0x2588) + String.fromCharCode(0x2588);
-      const lines = [];
-      const b = 2;
-      for (let y = -b; y < n + b; y++) {
-        let row = "";
-        for (let x = -b; x < n + b; x++) {
-          const dark = x >= 0 && y >= 0 && x < n && y < n && qr.isDark(y, x);
-          row += dark ? blk : "  ";
-        }
-        lines.push(row);
-      }
-      ascii.textContent = lines.join("\n");
+      /* scale for mobile readability */
+      const modules = qr.getModuleCount();
+      const cell = modules > 80 ? 2 : modules > 50 ? 3 : 4;
+      img.src = qr.createDataURL(cell, 2);
+      img.classList.remove("hidden");
+      setStatus("Signed QR ready · " + text.length + " chars · " + modules + "×" + modules, "ok");
     } catch (e) {
-      ascii.textContent = "QR: " + e.message;
+      if (err) {
+        err.textContent =
+          "Could not fit signed PSBT in one QR (" +
+          (e.message || e) +
+          "). Use DOWNLOAD .PSBT instead.";
+        err.classList.remove("hidden");
+      }
+      setStatus("QR too large — use Download .psbt", "err");
     }
   }
+
 
   /* ---------- keygen ritual ---------- */
   function openKeygen() {
@@ -5523,7 +5556,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       a.download = "signed.psbt";
       a.click();
     };
-    $("btnQr").onclick = () => renderAsciiQr($("psbtOut").value);
+    $("btnQr").onclick = () => renderSignedQr($("psbtOut").value);
 
     document.addEventListener("keydown", (e) => {
       if (keygenPhase === "closed") return;
