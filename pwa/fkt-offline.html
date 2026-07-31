@@ -892,7 +892,7 @@ html[data-crt="amber"] .theme-yy {
         <button type="button" class="crt-btn crt-btn-primary" id="btnKeygen">+ KEYGEN · NEW SEED</button>
         <button type="button" class="crt-btn crt-btn-ghost" id="btnClearSession">CLEAR SESSION</button>
       </div>
-      <p class="site-foot"><a href="https://gitfkt.dev" target="_blank" rel="noopener">gitfkt.dev</a> · <span id="buildTag">build-signfix2</span></p>
+      <p class="site-foot"><a href="https://gitfkt.dev" target="_blank" rel="noopener">gitfkt.dev</a> · <span id="buildTag">build-signfix3</span></p>
     </main>
   </div>
 </div>
@@ -3344,22 +3344,56 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     }
     if (typeof secpWin.G !== "function") throw new Error("secp hash boot failed");
 
+    function copyU8(win, src) {
+      /* Uint8Array from another iframe fails instanceof checks in noble */
+      if (!src) throw new Error("copyU8: empty");
+      var len = src.length != null ? src.length : src.byteLength;
+      var out = new win.Uint8Array(len);
+      if (src instanceof ArrayBuffer) out.set(new Uint8Array(src));
+      else out.set(src);
+      return out;
+    }
+
+    function copyOut(src) {
+      /* copy result back to parent realm */
+      if (!src) return src;
+      if (src instanceof Uint8Array || ArrayBuffer.isView(src)) {
+        var o = new Uint8Array(src.length != null ? src.length : src.byteLength);
+        o.set(src);
+        return o;
+      }
+      return src;
+    }
+
     _cleanCrypto = {
       secp: secpWin.FKT_SECP,
       HDKey: bip32Win.FKT_BIP32.HDKey,
-      /* optional: node.sign via bip32's embedded secp for ECDSA */
+      bip32Win: bip32Win,
+      secpWin: secpWin,
+      copyToBip32: function (u8) {
+        return copyU8(bip32Win, u8);
+      },
+      fromMasterSeed: function (seedBytes) {
+        return bip32Win.FKT_BIP32.HDKey.fromMasterSeed(copyU8(bip32Win, seedBytes));
+      },
       signEcdsa: function (msgHash, privBytes) {
-        /* Prefer clean secp; fall back to temp HDKey.sign if needed */
-        var sig = secpWin.FKT_SECP.signSync(msgHash, privBytes, { der: false });
-        if (sig && typeof sig.toCompactRawBytes === "function") return sig.toCompactRawBytes();
-        if (sig instanceof Uint8Array) return sig;
-        throw new Error("bad ecdsa result");
+        var msg = copyU8(secpWin, msgHash);
+        var priv = copyU8(secpWin, privBytes);
+        var sig = secpWin.FKT_SECP.signSync(msg, priv, { der: false });
+        if (sig && typeof sig.toCompactRawBytes === "function") {
+          return copyOut(sig.toCompactRawBytes());
+        }
+        if (sig && (sig instanceof secpWin.Uint8Array || ArrayBuffer.isView(sig))) {
+          return copyOut(sig);
+        }
+        throw new Error("bad ecdsa result: " + (sig && sig.constructor && sig.constructor.name));
       },
       signSchnorr: function (msgHash, privBytes) {
-        var sig = secpWin.FKT_SECP.schnorr.signSync(msgHash, privBytes);
-        if (sig instanceof Uint8Array) return sig;
-        if (sig && typeof sig.toRawBytes === "function") return sig.toRawBytes();
-        throw new Error("bad schnorr result");
+        var msg = copyU8(secpWin, msgHash);
+        var priv = copyU8(secpWin, privBytes);
+        var sig = secpWin.FKT_SECP.schnorr.signSync(msg, priv);
+        if (sig && typeof sig.toRawBytes === "function") return copyOut(sig.toRawBytes());
+        return copyOut(sig);
       },
     };
     return _cleanCrypto;
@@ -4059,9 +4093,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     }
     try {
       const clean = getCleanCrypto();
-      const secpLive = clean.secp;
-      const CleanHDKey = clean.HDKey;
-      const master = CleanHDKey.fromMasterSeed(seedBytes);
+      const master = clean.fromMasterSeed(seedBytes);
       const m = psbtMeta,
         tx = m.tx;
       const newInputMaps = m.inputMaps.map((imap) =>
@@ -4098,10 +4130,15 @@ globalThis.FKT_WORDLIST = {wordlist: e};
         if (!pathIdxs) continue;
         let node = master;
         for (const idx of pathIdxs) node = node.deriveChild(idx);
-        const priv = node.privateKey;
-        if (!priv) throw new Error("no priv IN[" + i + "]");
+        const privRaw = node.privateKey;
+        if (!privRaw) throw new Error("no priv IN[" + i + "]");
+        /* normalize to parent-realm Uint8Array */
+        const priv = new Uint8Array(privRaw.length);
+        priv.set(privRaw);
         if (stype === "P2WPKH") {
-          const pub = node.publicKey;
+          const pubRaw = node.publicKey;
+          const pub = new Uint8Array(pubRaw.length);
+          pub.set(pubRaw);
           const h160 = hash160(pub);
           const sc = concat([
             new Uint8Array([0x76, 0xa9, 0x14]),
