@@ -55,7 +55,7 @@ No external libraries required. `libsecp256k1` is built statically from source.
 |------------------------|----------------------------------|-------|
 | **CLI (Ice Cold)**     | Solid / usable                  | P2WPKH + Taproot keypath, real Sparrow vectors, dense ASCII QR |
 | **DOS / Floppy**       | Working (`FKTSIGN.EXE`)         | Ready for 486-class hardware validation |
-| **PWA**                | Rough single-file sketch        | State-based dashboard exists, not yet daily-driver polished |
+| **PWA** | Functional Phase 0 (locked) | Single-file offline, real crypto, wipe-after-sign, unified QR + BBQR/UR, P2WPKH+P2TR, CRT aesthetic. ALPHA/TESTNET only. |
 | **Warm (encrypted seed)** | Designed, not fully polished | Optional encrypted backup path with loud warnings |
 | **Ark / BARC / OpenARC** | Explicitly later (V3)         | Not in current scope |
 | **USB GUI (FKT-144)**  | Planned                        | Bootable Tiny Core path |

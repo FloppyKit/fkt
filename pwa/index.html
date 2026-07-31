@@ -916,7 +916,7 @@ html[data-crt="amber"] .theme-yy {
         <button type="button" class="crt-btn crt-btn-primary" id="btnKeygen">+ KEYGEN · NEW SEED</button>
         <button type="button" class="crt-btn crt-btn-ghost" id="btnClearSession">CLEAR SESSION</button>
       </div>
-      <p class="site-foot"><a href="https://gitfkt.dev" target="_blank" rel="noopener">gitfkt.dev</a> · <span id="buildTag">build-signfix4</span></p>
+      <p class="site-foot"><a href="https://gitfkt.dev" target="_blank" rel="noopener">gitfkt.dev</a> · <span id="buildTag">build-phase0</span></p>
     </main>
   </div>
 </div>
@@ -3263,25 +3263,6 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     return out;
   }
   const doubleSha256 = (d) => sha256pure(sha256pure(d));
-  function hmacSha256pure(key, ...messages) {
-    const block = 64;
-    let k = key instanceof Uint8Array ? key : new Uint8Array(key);
-    if (k.length > block) k = sha256pure(k);
-    if (k.length < block) {
-      const nk = new Uint8Array(block);
-      nk.set(k);
-      k = nk;
-    }
-    const oKey = new Uint8Array(block);
-    const iKey = new Uint8Array(block);
-    for (let i = 0; i < block; i++) {
-      oKey[i] = k[i] ^ 0x5c;
-      iKey[i] = k[i] ^ 0x36;
-    }
-    const innerMsg = concat([iKey].concat(messages.map((m) => (m instanceof Uint8Array ? m : new Uint8Array(m)))));
-    const inner = sha256pure(innerMsg);
-    return sha256pure(concat([oKey, inner]));
-  }
 
   let _cleanCrypto = null;
 
@@ -3343,12 +3324,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
   ].join(String.fromCharCode(10));
 
   function getCleanCrypto() {
-    /*
-     * Two isolated iframes (never load bip39 there):
-     *  - bip32 alone → HDKey (embeds its own secp for derivation/ECDSA)
-     *  - secp + hash boot alone → schnorr + ECDSA signSync
-     * Parent window stays polluted but signing never uses parent libs.
-     */
+    /* SEC: bip32 iframe + secp iframe (no bip39) — avoids esm.sh global pollution */
     if (_cleanCrypto) return _cleanCrypto;
     if (typeof document === "undefined") throw new Error("no document for crypto isolate");
 
@@ -3423,13 +3399,6 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     return _cleanCrypto;
   }
 
-  function getCleanSecp() {
-    return getCleanCrypto().secp;
-  }
-
-  function ensureSecpHashes() {
-    getCleanCrypto();
-  }
 
 
 
@@ -3717,7 +3686,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     const locktime = (tx[p] | (tx[p + 1] << 8) | (tx[p + 2] << 16) | (tx[p + 3] << 24)) >>> 0;
     return { ver, inputs, outputs, locktime, raw: tx };
   }
-  function parsePsbt(bytes) {
+  function parsePsbt(bytes) { /* SEC: read-only PSBT map walk */
     if (
       bytes.length < 5 ||
       bytes[0] !== 0x70 ||
@@ -3965,7 +3934,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     renderAll();
   }
 
-  function wipePsbt(silent) {
+  function wipePsbt(silent) { /* SEC: drop PSBT session */
     resetMultiScan();
     psbtBytes = null;
     psbtMeta = null;
@@ -3978,7 +3947,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
   }
 
   /* ---------- seed ---------- */
-  function validateSeedFromText(m) {
+  function validateSeedFromText(m) { /* SEC: BIP39 checksum → seed bytes */
     m = m.trim().toLowerCase().replace(/\s+/g, " ");
     seedOk = false;
     seedWords = null;
@@ -3995,7 +3964,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     return true;
   }
 
-  function wipeSeed(silent) {
+  function wipeSeed(silent) { /* SEC: zero seed RAM */
     seedOk = false;
     seedWords = null;
     seedFingerprint = null;
@@ -4106,7 +4075,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     ]);
   }
 
-  function doSign() {
+  function doSign() { /* SEC: derive+sign then wipe seed */
     if (!psbtMeta) {
       setStatus("No PSBT loaded", "err");
       return;
@@ -4396,7 +4365,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     return /^UR:/i.test(text.trim());
   }
 
-  async function ingestBBQRFrame(text) {
+  async function ingestBBQRFrame(text) { /* SEC: multi-frame BBQR join */
     const part = text.replace(/\s+/g, "").toUpperCase();
     if (part.length < 8) throw new Error("BBQR frame too short");
     const hdr6 = part.slice(0, 6); /* B$ + enc + type + total2 */
@@ -4525,7 +4494,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     return buf;
   }
 
-  async function ingestURFrame(text) {
+  async function ingestURFrame(text) { /* SEC: multi-frame UR join */
     const parsed = parseURFrame(text);
     if (!parsed) {
       setStatus("Unrecognized UR QR frame", "err");
@@ -4729,7 +4698,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       return;
     }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setStatus("Camera not available — use manual entry", "err");
+      setStatus("No camera API here — use manual entry (needs https or localhost)", "err");
       return;
     }
 
@@ -4887,7 +4856,17 @@ globalThis.FKT_WORDLIST = {wordlist: e};
       }, 180);
     } catch (e) {
       console.error(e);
-      setStatus("Camera denied or unavailable — use manual entry", "err");
+      var en = e && e.name;
+      if (en === "NotAllowedError" || en === "PermissionDeniedError")
+        setStatus("Camera permission denied — allow access or use manual entry", "err");
+      else if (en === "NotFoundError" || en === "DevicesNotFoundError")
+        setStatus("No camera found — use manual entry", "err");
+      else if (en === "NotReadableError" || en === "TrackStartError")
+        setStatus("Camera busy — close other apps and retry, or use manual entry", "err");
+      else if (en === "OverconstrainedError")
+        setStatus("Camera constraints failed — retry or use manual entry", "err");
+      else
+        setStatus("Camera unavailable — use manual entry", "err");
       stopScan();
     }
   }
@@ -4998,7 +4977,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     keygenEntropyPool.push(a, dt & 0xff);
     renderKeygen();
   }
-  function keygenFinishEntropy() {
+  function keygenFinishEntropy() { /* SEC: CSPRNG+pool → BIP39 */
     if (keygenPhase !== "entropy") return;
     if (keygenPct < 100) {
       setStatus("Need more chaos… keep pressing Space / ROLL", "err");
@@ -5446,7 +5425,7 @@ globalThis.FKT_WORDLIST = {wordlist: e};
     try {
       getCleanCrypto();
     } catch (e) {
-      console.warn("crypto isolate setup", e);
+      /* isolate optional at boot; doSign will retry */
     }
     /* theme */
     function applyTheme(next) {

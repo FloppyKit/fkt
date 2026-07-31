@@ -1,21 +1,22 @@
 # FKT Offline PWA (ICED COLD)
 
-**Functional Phase 0 (locked)** — single-file offline companion with real crypto.
+**Status: Functional Phase 0 (locked)**
 
-- Unified camera QR scan (seed vs PSBT auto-detect) + BBQR / classic UR multi-frame
+Single-file offline companion — real crypto, CRT dashboard, no CDN:
+
+- Unified camera QR (seed / PSBT + BBQR / UR multi-frame)
 - BIP39 seed load / fingerprint / wipe-after-sign
-- PSBT parse · human-first transaction review · Technical Details drawer
-- Sign path (P2WPKH + P2TR keypath)
+- PSBT parse · human-first review · Technical Details
+- Sign path: P2WPKH + P2TR keypath (no CONFIRM typing gate)
 - KEYGEN entropy ritual (CLI-aligned)
-- Green / amber CRT theme · offline pill
-- Dense ASCII / download signed Base64 output
+- Green / amber CRT theme · offline-only (no manifest / service worker)
 
-**No CDN. No simulate buttons. ALPHA / TESTNET experimental only.**
+**ALPHA / TESTNET only.** No classic install surface.
 
 **Live (GitHub Pages):** [https://gitfkt.dev/pwa/](https://gitfkt.dev/pwa/)  
 Landing: [https://gitfkt.dev/](https://gitfkt.dev/)
 
-File: **`index.html`** (~360 KiB). Mirror: `fkt-offline.html`.
+File: **`index.html`** (~355 KiB). Mirror: `fkt-offline.html` (same bytes).
 
 ```bash
 # camera often needs https or localhost:
