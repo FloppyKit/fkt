@@ -26,7 +26,9 @@ A minimal, paranoid, air-gapped Bitcoin PSBT signer that runs on hardware from 1
 > **⚠️ ALPHA / TESTNET & EXPERIMENTAL USE ONLY**  
 > Do **not** use with real funds.  
 > This is still early, actively changing code. Expect breaking changes and rough edges.  
-> Feedback, test vectors, and brutal review are welcome.
+> Feedback, test vectors, and brutal review are welcome. 
+
+> Seems to work well on testnet. Mainnet not yet tried. 
 
 ---
 
@@ -57,7 +59,7 @@ No external libraries required. `libsecp256k1` is built statically from source.
 | **DOS / Floppy**       | Working (`FKTSIGN.EXE`)         | Ready for 486-class hardware validation |
 | **PWA** | Functional Phase 0 (locked) | Single-file offline, real crypto, wipe-after-sign, unified QR + BBQR/UR, P2WPKH+P2TR, CRT aesthetic. ALPHA/TESTNET only. |
 | **Warm (encrypted seed)** | Designed, not fully polished | Optional encrypted backup path with loud warnings |
-| **Ark / BARC / OpenARC** | Explicitly later (V3)         | Not in current scope |
+| **Ark / BARK / OpenARK** | Explicitly later (V3)         | Not in current scope |
 | **USB GUI (FKT-144)**  | Planned                        | Bootable Tiny Core path |
 
 
@@ -122,7 +124,7 @@ DOS / floppy build instructions live in cli/docs/ and dist/floppy-iced-cold/.
 
 Floppy Kit is a collaboration between human and machine.  
 The current iteration has significant code contributions by DeepSeek and Grok.  
-Grok is a core member of the Floppy Kit team.
+
 
 ### License
 
