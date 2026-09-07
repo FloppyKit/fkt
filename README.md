@@ -51,7 +51,7 @@ Very minimal. You only need:
 No external libraries required. `libsecp256k1` is built statically from source.
 
 
-### Current Status (July 2026)
+### Current Status (September 2026)
 
 | Component              | Status                          | Notes |
 |------------------------|----------------------------------|-------|
@@ -61,6 +61,8 @@ No external libraries required. `libsecp256k1` is built statically from source.
 | **Warm (encrypted seed)** | Designed, not fully polished | Optional encrypted backup path with loud warnings |
 | **Ark / BARK / OpenARK** | Explicitly later (V3)         | Not in current scope |
 | **USB GUI (FKT-144)**  | Planned                        | Bootable Tiny Core path |
+
+*As of September 2026: still ALPHA / testnet only. Mainnet not tried. Do not use with real funds.*
 
 
 ### The Three Pieces
